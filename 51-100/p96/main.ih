@@ -1,0 +1,12 @@
+#include "sudoku/sudoku.h"
+#include <iostream>
+#include <fstream>
+#include <thread>
+#include <chrono>
+
+using namespace std;
+using namespace chrono;
+using namespace this_thread;
+
+// Imports Sudoku's in sudoku.txt and returns a vector of Sudoku objects.
+vector<Sudoku> import(string const &fileName);

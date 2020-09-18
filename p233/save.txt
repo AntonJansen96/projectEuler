@@ -1,0 +1,82 @@
+vector<size_t> primeFactors(size_t number)
+{
+    vector<size_t> factors;
+
+    if (number % 2 == 0) // FACTOR 2.
+    {
+        factors.push_back(2);
+        size_t exponent = 0;
+
+        while (number % 2 == 0)
+        {
+            ++exponent;
+            number /= 2;
+        }
+        
+        factors.push_back(exponent);
+    }
+    
+    for (size_t ii = 3; ii <= sqrt(number); ii += 2) // OTHER FACTORS.
+    {
+        if (number % ii == 0)
+        {
+            factors.push_back(ii);
+            size_t exponent = 0;
+
+            while (number % ii == 0)
+            {
+                ++exponent;
+                number /= ii;
+            }
+
+            factors.push_back(exponent);
+        }
+    }
+
+    if (number > 2) // FOR IF NUMBER IS A PRIME LARGER THAN 2.
+    {
+        factors.push_back(number);
+        factors.push_back(1);
+    }
+
+    return factors;
+}
+
+
+// size_t numTriplets(vector<size_t> const &factors)
+// {
+//     size_t r = 1;
+    
+//     for (size_t base = 0; base < factors.size(); base += 2)
+//     {
+//         if (factors[base] % 4 == 1)
+//             r *= (2 * factors[base + 1] + 1);
+//     }
+
+//     return 4 * r;
+// }
+
+// size_t compute(size_t R)
+// {
+//     size_t count = 0;
+
+//     for (size_t i = 0; i <= R; ++i)
+//     {
+//         double y = sqrt(R * R - i * i);
+//         if (floor(y) == y)
+//         {
+//             ++count;
+//             // cout << i << ", " << y << '\n'; // debug
+//         }
+//     }
+    
+//     return 4 * count - 4;
+// }
+
+// void printFancy(vector<size_t> const &vector)
+// {
+// for (size_t idx = 0; idx < vector.size() - 1; idx += 2)
+//         cout << '(' << vector[idx] << '^' << vector[idx + 1] << ')';
+    
+//     cout << '\n';
+// }
