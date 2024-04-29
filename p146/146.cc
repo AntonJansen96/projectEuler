@@ -1,37 +1,27 @@
-#include "stopwatch/stopwatch.h"
 #include "euler/euler.h"
-#include "easy/easy.h"
 #include <iostream>
 #include <omp.h>
 #include <atomic>
 
-Stopwatch timer("prime generation");
-euler::Primetools p{1'000'000'000'000'000};
-
-size_t nextPrime(size_t prime)
-{
-    size_t num = prime + 2;
-    while (true)
-    {
-        if (p.isPrime(num))
-            return num;
-
-        num += 2;
-    }
-}
+euler::Primetools p;
 
 size_t check(size_t n)
 {
-    if (not p.isPrime(n * n + 1))
-        return false;
-    
-    if 
-    (
-        nextPrime(n * n + 1)  == n * n + 3  and
-        nextPrime(n * n + 3)  == n * n + 7  and
-        nextPrime(n * n + 7)  == n * n + 9  and
-        nextPrime(n * n + 9)  == n * n + 13 and
-        nextPrime(n * n + 13) == n * n + 27
+    if (
+            p.miller_rabin(n * n + 1)  and
+            p.miller_rabin(n * n + 3)  and
+        not p.miller_rabin(n * n + 5)  and
+            p.miller_rabin(n * n + 7)  and
+            p.miller_rabin(n * n + 9)  and
+        not p.miller_rabin(n * n + 11) and
+            p.miller_rabin(n * n + 13) and
+        not p.miller_rabin(n * n + 15) and
+        not p.miller_rabin(n * n + 17) and
+        not p.miller_rabin(n * n + 19) and
+        not p.miller_rabin(n * n + 21) and
+        not p.miller_rabin(n * n + 23) and
+        not p.miller_rabin(n * n + 25) and
+            p.miller_rabin(n * n + 27)
     )
         return true;
     
@@ -40,24 +30,15 @@ size_t check(size_t n)
 
 int main()
 {
-    timer.time();
-    Stopwatch timer2("main");
     std::atomic<size_t> total{0};
 
     #pragma omp parallel for
-    for (size_t n = 10; n < 1'000'000; ++n)
+    for (size_t n = 10; n < 150'000'000; n += 1)
         if (check(n))
+        {
+            std::cout << n << '\n';
             total += n;
+        }
 
-    timer2.time();
     std::cout << total << '\n';
 }
-
-    // Assert example
-    // int num = 10;
-    // std::cout   << num*num + 1 << ", "
-    //             << num*num + 3 << ", "
-    //             << num*num + 7 << ", "
-    //             << num*num + 9 << ", "
-    //             << num*num + 13 << ", "
-    //             << num*num + 27 << '\n';
