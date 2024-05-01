@@ -26,12 +26,14 @@ for _ in range(1, 91):
 fibs = fibs[2:]
 print(fibs)
 
+
 def s(n: int) -> int:
     pass
 
+
 N = 1000
 
-x = [i*10**j-1 for j in range(0, N // 10) for i in range(1, 10)]
+x = [i * 10**j - 1 for j in range(0, N // 10) for i in range(1, 10)]
 x = [i % 1000000007 for i in x]
 # print(x)
 # print(sum(x[:21]))
