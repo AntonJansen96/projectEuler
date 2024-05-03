@@ -1,11 +1,12 @@
 #include <iostream>
 #include <algorithm>
 #include <vector>
-#include <map>
 #include <atomic>
 #include <omp.h>
 
+
 size_t const N = 50;
+
 
 void genPartitionsHelper(int n, std::vector<int> &part, int max, std::vector<std::vector<int>>& result)
 {
@@ -23,6 +24,7 @@ void genPartitionsHelper(int n, std::vector<int> &part, int max, std::vector<std
     }
 }
 
+
 std::vector<std::vector<int>> genPartitions(int n)
 {
     std::vector<std::vector<int>> result;
@@ -31,9 +33,10 @@ std::vector<std::vector<int>> genPartitions(int n)
     return result;
 }
 
+
 class PartitionClassifier
 {
-    size_t d_ones;
+    size_t const d_ones;
     std::vector<int> d_array;
 
     public:
@@ -60,36 +63,16 @@ class PartitionClassifier
         }
 };
 
-std::tuple<size_t, size_t> vectorHash(std::vector<int> const &array)
+
+size_t uniqueCorrectPerms(PartitionClassifier const &classifier)
 {
-    std::size_t seed1 = array.size();
-    std::size_t seed2 = array.size() + 1;
-
-    for (auto const &i : array)
-    {
-        seed1 ^= std::hash<int>()(i) + 0x9e3779b9 + (seed1 << 6) + (seed1 >> 2);
-        seed2 ^= std::hash<int>()(i) + 0x9e3779b9 + (seed2 << 6) + (seed2 >> 2);
-    }
-
-    return std::make_tuple(seed1, seed2);
-}
-
-size_t uniqueCorrectPerms(PartitionClassifier &classifier)
-{
-    size_t count = 0;
-    std::map<std::tuple<size_t, size_t>, bool> dict;
-    auto &part = classifier.d_part;
+    auto part = classifier.d_part;
     auto const multiplicity = classifier.d_multiplicity;
 
+    size_t count = 0;
     std::sort(part.begin(), part.end());
 
     do
-    {
-        // Create hash of the current permutation of the part.
-        auto const hash = vectorHash(part);
-
-        // If the hash is not yet in the dictionary.
-        if (dict.find(vectorHash(part)) == dict.end())
         {   // This block checks if there are two non-1 blocks next to each other.
             bool skip = false;
             for (size_t idx = 0; idx < part.size() - 1; ++idx)
@@ -101,21 +84,18 @@ size_t uniqueCorrectPerms(PartitionClassifier &classifier)
                 }
             }
             if (not skip)
-            {
-                dict[hash] = true;
                 count += multiplicity;
-            }
-        }
     } while (std::next_permutation(part.begin(), part.end()));
 
     return count;
 }
 
+
 int main()
 {
     std::vector<PartitionClassifier> distinct_partitions;
 
-    for (auto &part : genPartitions(N))
+    for (auto const &part : genPartitions(N))
     {
         // Filter partitions containing a block of length 2.
         if (std::find(part.begin(), part.end(), 2) != part.end())
@@ -151,16 +131,13 @@ int main()
         }
     }
 
-    std::cout << distinct_partitions.size() << '\n';
-
     std::atomic<size_t> count{0};
     std::atomic<size_t> prog{0};
 
     #pragma omp parallel for schedule(dynamic)
-    for (auto &classifier : distinct_partitions)
+    for (auto const &classifier : distinct_partitions)
     {
-        // Do progress update.
-        #pragma omp critical    
+        #pragma omp critical
         { std::cout << "\rProgress: " << ++prog << '/' << distinct_partitions.size() << std::flush; }
 
         count += uniqueCorrectPerms(classifier);
@@ -195,3 +172,6 @@ int main()
 // we then simply add the 1 * their multiplicity to count.
 // Tother with other tricks this reduces (for N = 50) the number of partitions to
 // be checked from 204226 to just 3329.
+
+// Edit: we don't need the fuck hashing as std::next_permutation already generates
+// UNIQUE permutations!
