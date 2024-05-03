@@ -31,6 +31,35 @@ std::vector<std::vector<int>> genPartitions(int n)
     return result;
 }
 
+class PartitionClassifier
+{
+    size_t d_ones;
+    std::vector<int> d_array;
+
+    public:
+        std::vector<int> d_part;
+        size_t d_multiplicity;
+
+        PartitionClassifier(std::vector<int> const &part)
+        :
+            d_ones(std::count(part.begin(), part.end(), 1)),
+            d_part(part),
+            d_multiplicity(1)
+        {
+            for (size_t blocklen = 3; blocklen != 51; ++blocklen)
+            {
+                auto const num = std::count(part.begin(), part.end(), blocklen);
+                if (num > 0)
+                    d_array.push_back(num);
+            }
+        }
+
+        bool operator==(const PartitionClassifier &other) const
+        {
+            return (d_array == other.d_array) && (d_ones == other.d_ones);
+        }
+};
+
 std::tuple<size_t, size_t> vectorHash(std::vector<int> const &array)
 {
     std::size_t seed1 = array.size();
@@ -45,10 +74,13 @@ std::tuple<size_t, size_t> vectorHash(std::vector<int> const &array)
     return std::make_tuple(seed1, seed2);
 }
 
-size_t uniqueCorrectPerms(std::vector<int> &part)
+size_t uniqueCorrectPerms(PartitionClassifier &classifier)
 {
     size_t count = 0;
     std::map<std::tuple<size_t, size_t>, bool> dict;
+    auto &part = classifier.d_part;
+    auto const multiplicity = classifier.d_multiplicity;
+
     std::sort(part.begin(), part.end());
 
     do
@@ -71,7 +103,7 @@ size_t uniqueCorrectPerms(std::vector<int> &part)
             if (not skip)
             {
                 dict[hash] = true;
-                count += 1;
+                count += multiplicity;
             }
         }
     } while (std::next_permutation(part.begin(), part.end()));
@@ -81,16 +113,10 @@ size_t uniqueCorrectPerms(std::vector<int> &part)
 
 int main()
 {
-    std::atomic<size_t> prog{0};
-    std::atomic<size_t> count{0};
+    std::vector<PartitionClassifier> distinct_partitions;
 
-    #pragma omp parallel for schedule(dynamic)
     for (auto &part : genPartitions(N))
     {
-        // Do progress update.
-        #pragma omp critical
-        { std::cout << "\rProgress: " << ++prog << '/' << 204226 << std::flush; }
-
         // Filter partitions containing a block of length 2.
         if (std::find(part.begin(), part.end(), 2) != part.end())
             continue;
@@ -106,10 +132,41 @@ int main()
         if (other > ones + 1)
             continue;
 
-        count += uniqueCorrectPerms(part);
+        // This block checks if partitions are equivalent to save a lot of time.
+        auto classifier = PartitionClassifier(part);
+
+        bool found = false;
+        for (size_t idx = 0; idx != distinct_partitions.size(); ++idx)
+        {
+            if (classifier == distinct_partitions[idx])
+            {
+                distinct_partitions[idx].d_multiplicity += 1;
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+        {
+            distinct_partitions.push_back(classifier);
+        }
     }
 
-    std::cout << '\n' << "count (new) = " << count << '\n' << std::flush;
+    std::cout << distinct_partitions.size() << '\n';
+
+    std::atomic<size_t> count{0};
+    std::atomic<size_t> prog{0};
+
+    #pragma omp parallel for schedule(dynamic)
+    for (auto &classifier : distinct_partitions)
+    {
+        // Do progress update.
+        #pragma omp critical    
+        { std::cout << "\rProgress: " << ++prog << '/' << distinct_partitions.size() << std::flush; }
+
+        count += uniqueCorrectPerms(classifier);
+    }
+
+    std::cout << '\n' << count << '\n' << std::flush;
 }
 
 // This ran in roughly 28 hours on tcbl13.
@@ -132,3 +189,9 @@ int main()
 // Edit: changed the way we do the hashing to avoid hash collisions.
 // Now using a tuple of two hashes instead of adding them together in the same size_t.
 // Apparently, this confers an additional speedup of 40%.
+
+// Edit: using the PartitionClassifier class to eliminate many partitions as a lot
+// of them might contain different numbers but are combinatorically equivalent.
+// we then simply add the 1 * their multiplicity to count.
+// Tother with other tricks this reduces (for N = 50) the number of partitions to
+// be checked from 204226 to just 3329.
