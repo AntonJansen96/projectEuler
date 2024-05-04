@@ -174,4 +174,4 @@ int main()
 // be checked from 204226 to just 3329.
 
 // Edit: we don't need the fuck hashing as std::next_permutation already generates
-// UNIQUE permutations!
+// UNIQUE permutations! N = 50 now runs on tcbl13 in 6m12s and gives correct answer.
