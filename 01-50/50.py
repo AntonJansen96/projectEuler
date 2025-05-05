@@ -1,28 +1,23 @@
-from math import sqrt; from itertools import count, islice
+#!/usr/bin/env python3
 
-def isprime(n):
-	return n > 1 and all(n%i for i in islice(count(2), int(sqrt(n)-1)))
+from science.euler.primes import Primes
 
-primelist = []
-for i in xrange(1,10000):
-	if isprime(i) is True:
-		primelist.append(i)
+primes = Primes.sieve(5000)
 
-largest = 0
+maxsum = 0
+maxcount = 0
+for ii in range(0, len(primes)):
 
-for i in xrange(0,len(primelist)):
-	
-	consecutive = 0
-	number = 0
+    sum = 0
+    count = 0
+    for jj in range(ii, len(primes)):
 
-	for j in xrange(i,len(primelist)):
-		
-		if number > 10**6:
-			continue
+        sum += primes[jj]
+        count += 1
 
-		number += primelist[j]
-		consecutive += 1
+        if sum > 1000000:
+            break
 
-		if isprime(number) is True and consecutive > largest:
-			largest = consecutive
-			print("%s is made up of %s primes" % (number,consecutive))
+        if Primes.isprime(sum) and count > maxcount:
+            maxsum, maxcount = sum, count
+            print(maxsum, maxcount)
