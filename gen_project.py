@@ -22,7 +22,7 @@ using namespace pythonlike;
 
 int main()
 {{
-    Stopwatch timer;
+    stopwatch::Stopwatch timer;
     timer.start();
     print("Hello world from project {project_name}!");
     timer.time();
