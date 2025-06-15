@@ -1,9 +1,11 @@
 #include <flint/arb_poly.h>
 #include <flint/arb_calc.h>
 
-slong eval_count = 0;
 
-int sin_x(arb_ptr out, const arb_t inp, void *params, slong order, slong prec)
+slong eval_count = 0; // Tracks how often the function was called/evaluated.
+
+
+int sin_x(arb_ptr out, const arb_t inp, void * params, slong order, slong prec)
 {
     int xlen = FLINT_MIN(2, order);
 
@@ -17,43 +19,28 @@ int sin_x(arb_ptr out, const arb_t inp, void *params, slong order, slong prec)
     return 0;
 }
 
-int sin_x2(arb_ptr out, const arb_t inp, void *params, slong order, slong prec)
+// Our function that we want to find the roots of.
+int myfunc(arb_ptr out, const arb_t inp, void *param, slong order, slong prec)
 {
-    arb_ptr x;
+    slong P = 3; // Hardcoded for now.
 
-    int xlen = FLINT_MIN(2, order);
-    int ylen = FLINT_MIN(3, order);
-
-    x = _arb_vec_init(xlen);
+    arb_t x, invx;
+    arb_init(x);
+    arb_init(invx);
 
     arb_set(x, inp);
-    if (xlen > 1)
-        arb_one(x + 1);
 
-    _arb_poly_mullow(out, x, xlen, x, xlen, ylen, prec);
-    _arb_poly_sin_series(out, out, ylen, order, prec);
+    for (slong i = 0; i != P - 1; ++i)
+    {
+        arb_inv(invx, x, prec);    // invx = 1/x
+        arb_sub(x, x, invx, prec); // x = x - 1/x
+    }
 
-    _arb_vec_clear(x, xlen);
+    // out = x - inp
+    arb_sub(out, x, inp, prec);
 
-    eval_count++;
-    return 0;
-}
-
-int sin_1x(arb_ptr out, const arb_t inp, void *params, slong order, slong prec)
-{
-    arb_ptr x;
-    int xlen = FLINT_MIN(2, order);
-
-    x = _arb_vec_init(xlen);
-
-    arb_set(x, inp);
-    if (xlen > 1)
-        arb_one(x + 1);
-
-    _arb_poly_inv_series(out, x, xlen, order, prec);
-    _arb_poly_sin_series(out, out, order, order, prec);
-
-    _arb_vec_clear(x, xlen);
+    arb_clear(x);
+    arb_clear(invx);
 
     eval_count++;
     return 0;
@@ -61,111 +48,82 @@ int sin_1x(arb_ptr out, const arb_t inp, void *params, slong order, slong prec)
 
 int main()
 {
-    arf_interval_ptr blocks;
-    int *info;
+    slong P = 3;                            // Period P.
+    double const a = 1.0;                   // interval [a, b].
+    double const b = 4.0;                   // interval [b, b].
 
-    int param1 = 0;
-    void *params = &param1;
+    // Set up all the parameters that go into arb_calc_isolate_roots.
 
-    arb_calc_func_t function = sin_x2;      // function to find root for.
-    double a = 0;                           // interval [a, b]
-    double b = 10;                          // interval [b, b]
-
-    // int refine = 0;
-    slong digits = 0;
-    slong maxdepth = 30;
-    slong maxeval = 100000;
-    slong maxfound = 100000;
-
-    slong low_prec = 30;
-    // slong high_prec = digits * 3.32192809488736 + 10;
-
-    slong found_roots = 0;
-    slong found_unknown = 0;
-
-    arf_t C;
-    arf_init(C);
-    arf_interval_t t;
-    arf_interval_init(t);    
-    arf_interval_t interval;
+    arf_interval_ptr blocks;                // 1. Holds the root interval blocks.
+    int *flags;                             // 2. int array; one for each root.
+    arb_calc_func_t function = sin_x;       // 3. Function to find root for.
+    void *param = &P;                       // 4. Function parameter(s).
+    
+    arf_interval_t interval;                // 5. interval for searching the roots.
     arf_interval_init(interval);
-    arb_t v;
-    arb_init(v);
-    arb_t w;
-    arb_init(w);
-    arb_t z;
-    arb_init(z);
     arf_set_d(&interval->a, a);
     arf_set_d(&interval->b, b);
 
-    flint_printf("interval: "); arf_interval_printd(interval, 15); flint_printf("\n");
-    flint_printf("maxdepth = %wd, maxeval = %wd, maxfound = %wd, low_prec = %wd\n", maxdepth, maxeval, maxfound, low_prec);
+    // 6. Max number of recursive subdivisions to be attempted. 
+    // Smallest details that can be distinguished are ~2^-maxdepth.
+    // A typical, reasonable value might be between 20 and 50.
+    slong maxdepth = 20;
 
-    slong num = arb_calc_isolate_roots(&blocks, &info, function, params, interval, maxdepth, maxeval, maxfound, low_prec);
+    // 7. Total number of tested subintervals before algorithm is terminated.
+    // A typical, reasonable value might be between 100 and 100000.
+    slong maxeval = 10000;
 
-    for (slong i = 0; i != num; ++i)
+    // 8. The algorithm terminates if maxfound roots have been isolated.
+    // To try to find all roots, LONG_MAX may be passed.
+    slong maxfound = LONG_MAX;
+
+    // 9. The argument prec denotes the precision used to evaluate the function.
+    // Note that it probably does not make sense for maxdepth to exceed prec.
+    slong prec = 30;
+
+    // Main algorithm. Returns number of roots found.
+    slong num = arb_calc_isolate_roots(&blocks, &flags, function, param, interval, maxdepth, maxeval, maxfound, prec);
+
+    // Analyze by looping through the roots.
+    slong found_roots = 0;
+    slong found_unknown = 0;
+    slong digits = 6;
+    
+    arb_t approx;       // Declare and initialize an arb variable 
+    arb_init(approx);   // for holding the approximate root.
+
+    for (slong idx = 0; idx != num; ++idx)
     {
-        if (info[i] != 1)
+        if (flags[idx] == 1) // Correctly found a root.
         {
-            found_unknown++;
-            continue;
+            ++found_roots;
+
+            // Print the midpoint of the interval as an approximate root.
+            arf_interval_get_arb(approx, blocks + idx, prec);
+            flint_printf("approx root (%wd/%wd):\n", idx, num);
+            arb_printn(approx, digits + 2, 0);
+            double mid = arf_get_d(arb_midref(approx), ARF_RND_NEAR);
+            printf(", midpoint as double: %.10f\n", mid);
+            flint_printf("\n\n");
+
         }
-
-        found_roots++;
-
-        // Print the midpoint of the interval as an approximate root
-        arb_t approx;
-        arb_init(approx);
-        arf_interval_get_arb(approx, blocks + i, low_prec);
-        flint_printf("approx root (%wd/%wd):\n", i, num);
-        arb_printn(approx, digits + 2, 0);
-        flint_printf("\n\n");
-        arb_clear(approx);
-
-        // if (refine)
-        // {
-        //     if (arb_calc_refine_root_bisect(t, function, params, blocks + i, 5, low_prec) != ARB_CALC_SUCCESS)
-        //     {
-        //         flint_printf("warning: some bisection steps failed!\n");
-        //     }
-
-        //     if (arb_calc_refine_root_bisect(blocks + i, function, params, t, 5, low_prec) != ARB_CALC_SUCCESS)
-        //     {
-        //         flint_printf("warning: some bisection steps failed!\n");
-        //     }
-
-        //     arf_interval_get_arb(v, t, high_prec);
-        //     arb_calc_newton_conv_factor(C, function, params, v, low_prec);
-
-        //     arf_interval_get_arb(w, blocks + i, high_prec);
-
-        //     if (arb_calc_refine_root_newton(z, function, params, w, v, C, 10, high_prec) != ARB_CALC_SUCCESS)
-        //     {
-        //         flint_printf("warning: some newton steps failed!\n");
-        //     }
-
-        //     flint_printf("refined root (%wd/%wd):\n", i, num);
-        //     arb_printn(z, digits + 2, 0);
-        //     flint_printf("\n\n");
-        // }
+        else
+            ++found_unknown;
     }
 
+    // Summary.
     flint_printf("---------------------------------------------------------------\n");
     flint_printf("Found roots: %wd\n", found_roots);
     flint_printf("Subintervals possibly containing undetected roots: %wd\n", found_unknown);
     flint_printf("Function evaluations: %wd\n", eval_count);
 
-    for (slong i = 0; i < num; i++)
-        arf_interval_clear(blocks + i);
+    // Cleanup.
+    for (slong idx = 0; idx != num; ++idx)
+        arf_interval_clear(blocks + idx);
 
     flint_free(blocks);
-    flint_free(info);
-
-    arf_interval_clear(t);
+    flint_free(flags);
     arf_interval_clear(interval);
-    arf_clear(C);
-    arb_clear(v);
-    arb_clear(w);
-    arb_clear(z);
+    arb_clear(approx);
     flint_cleanup();
 }
