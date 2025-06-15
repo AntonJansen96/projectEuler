@@ -1,20 +1,11 @@
 #include <string.h>
 #include <stdlib.h>
-#include <flint/profiler.h>
 #include <flint/arb_poly.h>
 #include <flint/arb_calc.h>
 #include <flint/acb.h>
 #include <flint/acb_hypgeom.h>
-#include <flint/acb_dirichlet.h>
 
 slong eval_count = 0;
-
-typedef struct
-{
-    dirichlet_group_t * G;
-    dirichlet_char_t * chi;
-}
-z_param_struct;
 
 int
 sin_x(arb_ptr out, const arb_t inp, void * params, slong order, slong prec)
@@ -143,9 +134,6 @@ int main(int argc, char *argv[])
     int * info;
     void * params;
     int param1;
-    z_param_struct param2;
-    dirichlet_group_t G;
-    dirichlet_char_t chi;
     slong digits, low_prec, high_prec, i, num, found_roots, found_unknown;
     slong maxdepth, maxeval, maxfound;
     int refine;
@@ -159,7 +147,6 @@ int main(int argc, char *argv[])
         flint_printf("real_roots function a b [-refine d] [-verbose] "
             "[-maxdepth n] [-maxeval n] [-maxfound n] [-prec n]\n");
         flint_printf("available functions:\n");
-        flint_printf("  0  Z(x), Z-function (Riemann zeta or Dirichlet L-function)\n");
         flint_printf("  1  sin(x)\n");
         flint_printf("  2  sin(x^2)\n");
         flint_printf("  3  sin(1/x)\n");
@@ -167,13 +154,10 @@ int main(int argc, char *argv[])
         flint_printf("  5  Ai'(x), Airy function\n");
         flint_printf("  6  Bi(x), Airy function\n");
         flint_printf("  7  Bi'(x), Airy function\n");
-        flint_printf("With 0, specify optional Dirichlet character with [-character q n]\n");
         return 1;
     }
 
     param1 = 0;
-    param2.G = NULL;
-    param2.chi = NULL;
     params = &param1;
 
     switch (atoi(argv[1]))
@@ -250,14 +234,6 @@ int main(int argc, char *argv[])
         else if (!strcmp(argv[i], "-prec"))
         {
             low_prec = atol(argv[i+1]);
-        }
-        else if (!strcmp(argv[i], "-character"))
-        {
-            dirichlet_group_init(G, atol(argv[i+1]));
-            dirichlet_char_init(chi, G);
-            dirichlet_char_log(chi, G, atol(argv[i+2]));
-            param2.G = &G;
-            param2.chi = &chi;
         }
     }
 
@@ -351,14 +327,9 @@ int main(int argc, char *argv[])
 
     for (i = 0; i < num; i++)
         arf_interval_clear(blocks + i);
+
     flint_free(blocks);
     flint_free(info);
-
-    if (param2.G != NULL)
-    {
-        dirichlet_group_clear(G);
-        dirichlet_char_clear(chi);
-    }
 
     arf_interval_clear(t);
     arf_interval_clear(interval);
