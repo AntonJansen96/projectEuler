@@ -13,9 +13,6 @@ class RootFinder
     size_t d_found_roots = 0;
     size_t d_found_unknown = 0;
 
-    arb_t d_temp;               // Temp variable used in printing function.
-    arf_interval_t d_refined;   // Temp interval struct for refining.
-
     arf_interval_ptr d_blocks;  // 1. Holds the root blocks.
     int *d_flags;               // 2. int array; one for each root.
     arb_calc_func_t d_func;     // 3. function to find root for.
@@ -34,10 +31,12 @@ class RootFinder
         ~RootFinder();
         // Run root finding.
         void run();
-        // Refine the interval.
-        void refine(size_t idx);
-        // Print the interval (midpoint).
-        void printinterval(size_t idx);
+        // Compute intervals.
+        void compute_intervals();
+        // Refine interval using bisection.
+        void refine_bisect();
+        // Print the intervals (midpoints).
+        void printintervals();
         // Provide summary.
         void summary();
 
@@ -58,8 +57,6 @@ inline RootFinder::RootFinder(size_t P, double a, double b)
     d_maxfound(LONG_MAX),
     d_prec(30)
 {
-    arb_init(d_temp);
-    arf_interval_init(d_refined);
     arf_interval_init(d_interval);
     arf_set_d(&d_interval->a, a);
     arf_set_d(&d_interval->b, b);
@@ -73,8 +70,6 @@ inline RootFinder::~RootFinder()
 
     flint_free(d_blocks);
     flint_free(d_flags);
-    arb_clear(d_temp);
-    arf_interval_clear(d_refined);
     arf_interval_clear(d_interval);
     flint_cleanup();
 }
@@ -85,33 +80,63 @@ inline void RootFinder::run()
     stopwatch::Stopwatch timer;
     timer.start();
 
-    // Compute intervals (d_blocks, d_flags, d_num).
-    d_num = arb_calc_isolate_roots(&d_blocks, &d_flags, d_func, d_param, d_interval, d_maxdepth, d_maxeval, d_maxfound, d_prec);
-
-    // Loop through each interval.
-    for (size_t idx = 0; idx != d_num; ++idx)
-    {
-        this->printinterval(idx);
-        // this->refine(idx);
-        // this->printinterval(idx);
-
-        if (d_flags[idx] != 1)
-        {
-            ++d_found_unknown;
-        }
-
-        ++d_found_roots;
-    }
+    this->compute_intervals();
+    // this->printintervals();
+    this->refine_bisect();
+    this->printintervals();
 
     this->summary();
-    print(fs("\nrun() took {}", timer));
+    print(fs("\nRootFinder took {}", timer));
 }
 
-inline void RootFinder::refine(size_t idx)
+// Compute intervals.
+inline void RootFinder::compute_intervals()
 {
-    // Refines root interval entry idx in d_blocks array using bisection.
+    d_num = arb_calc_isolate_roots(&d_blocks, &d_flags, d_func, d_param, d_interval, d_maxdepth, d_maxeval, d_maxfound, d_prec);
+    
+    for (size_t idx = 0; idx != d_num; ++idx)
+    {
+        if (d_flags[idx] != 1)
+            ++d_found_unknown;
+        else
+            ++d_found_roots;
+    }
+}
+
+// Refine interval using bisection.
+inline void RootFinder::refine_bisect()
+{
     size_t const iter = 10;
-    arb_calc_refine_root_bisect(d_blocks + idx, myfunc, d_param, d_blocks + idx, iter, d_prec);
+     for (size_t idx = 0; idx != d_num; ++idx)
+        if (arb_calc_refine_root_bisect(d_blocks + idx, d_func, d_param, d_blocks + idx, iter, d_prec) != ARB_CALC_SUCCESS)
+            print(fs("WARNING: refine_bisect failed for root interval #{}", idx + 1));
+}
+
+// Print the intervals (midpoints).
+inline void RootFinder::printintervals()
+{
+    size_t const digits = 10;
+    
+    arb_init(d_temp);
+
+    for (size_t idx = 0; idx != d_num; ++idx)
+    {
+        arf_interval_get_arb(d_temp, d_blocks + idx, digits);
+
+        if (d_flags[idx] == 1)
+            print(fs("{}. {}", idx + 1, arb_get_str(d_temp, digits, 0)));
+        else
+            print(fs("{}. {} undetected", idx + 1, arb_get_str(d_temp, digits, 0)));
+    }
+
+    arb_clear(d_temp);
+}
+
+// inline void RootFinder::refine_bisect()
+// {
+    // Refines root interval entry idx in d_blocks array using bisection.
+    // size_t const iter = 10;
+    // arb_calc_refine_root_bisect(d_blocks + idx, myfunc, d_param, d_blocks + idx, iter, d_prec);
 
     // // Refines root interval entry idx in d_block array using Newton's method.
     // arb_t root;
@@ -130,17 +155,7 @@ inline void RootFinder::refine(size_t idx)
 
     // arb_clear(root);
     // arf_clear(conv_factor);
-}
-
-// Print the interval (midpoint).
-inline void RootFinder::printinterval(size_t idx)
-{
-    arf_interval_get_arb(d_temp, d_blocks + idx, d_prec);
-    if (d_flags[idx] == 1)
-        print(fs("{}. {}", idx + 1, arb_get_str(d_temp, 10, 0)));
-    else
-        print(fs("{}. {} undetected", idx + 1, arb_get_str(d_temp, 10, 0)));
-}
+// }
 
 // Provide summary.
 inline void RootFinder::summary()
@@ -205,115 +220,3 @@ int main()
 {
     RootFinder(3, 0.001, 7.0).run();
 }
-
-
-
-
-
-
-
-// int main()
-// {
-//     // Set up all the parameters that go into arb_calc_isolate_roots.
-
-//     slong d_P = 3          // Period P.
-//     double d_a = 1.0,       // interval [a, b].
-//     double d_b = 3.0;       // interval [b, b].
-//     slong d_num;
-
-//     arf_interval_ptr blocks;                // 1. Holds the root blocks.
-//     int *flags;                             // 2. int array; one for each root.
-//     arb_calc_func_t function = sin_x;       // 3. Function to find root for.
-//     void *param = &P;                       // 4. Function parameter(s).
-    
-//     arf_interval_t interval;                // 5. interval for searching the roots.
-//     arf_interval_init(interval);
-//     arf_set_d(&interval->a, a);
-//     arf_set_d(&interval->b, b);
-
-//     // 6. Max number of recursive subdivisions to be attempted. 
-//     // Smallest details that can be distinguished are ~2^-maxdepth.
-//     // A typical, reasonable value might be between 20 and 50.
-//     slong maxdepth = 20;
-
-//     // 7. Total number of tested subintervals before algorithm is terminated.
-//     // A typical, reasonable value might be between 100 and 100000.
-//     slong maxeval = 10000;
-
-//     // 8. The algorithm terminates if maxfound roots have been isolated.
-//     // To try to find all roots, LONG_MAX may be passed.
-//     slong maxfound = LONG_MAX;
-
-//     // 9. The argument prec denotes the precision used to evaluate the function.
-//     // Note that it probably does not make sense for maxdepth to exceed prec.
-//     slong prec = 30;
-
-//     // Main algorithm. Returns number of roots found.
-//     slong num = arb_calc_isolate_roots(&blocks, &flags, function, param, interval, maxdepth, maxeval, maxfound, prec);
-
-//     // Analyze by looping through the roots.
-//     slong found_roots = 0;
-//     slong found_unknown = 0;
-//     slong digits = 6;
-    
-//     arb_t approx;       // Declare and initialize an arb variable 
-//     arb_init(approx);   // for holding the approximate root.
-
-//     for (slong idx = 0; idx != num; ++idx)
-//     {
-//         if (flags[idx] == 1) // Correctly found a root.
-//         {
-//             ++found_roots;
-
-//             // Print the midpoint of the interval as an approximate root.
-//             arf_interval_get_arb(approx, blocks + idx, prec);
-//             flint_printf("approx root (%wd/%wd):\n", idx, num);
-//             arb_printn(approx, digits + 2, 0);
-//             double mid = arf_get_d(arb_midref(approx), ARF_RND_NEAR);
-//             printf(", midpoint as double: %.10f\n", mid);
-//             flint_printf("\n\n");
-
-//             // Refine the interval to high precision
-//             arf_interval_t refined;
-//             arf_interval_init(refined);
-
-//             slong high_prec = 200; // or whatever precision you want
-//             if (arb_calc_refine_root_bisect(refined, function, param, blocks + idx, 10, high_prec) == ARB_CALC_SUCCESS)
-//             {
-//                 arb_t root;
-//                 arb_init(root);
-//                 arf_interval_get_arb(root, refined, high_prec); // Get midpoint as high-precision root
-//                 flint_printf("high-precision root (%wd/%wd):\n", idx, num);
-//                 arb_printn(root, 50, 0); // Print with 50 digits
-//                 double mid = arf_get_d(arb_midref(root), ARF_RND_NEAR);
-//                 printf(", midpoint as double: %.10f\n", mid);
-//                 flint_printf("\n\n");
-//                 arb_clear(root);
-//             }
-//             else
-//             {
-//                 std::cout << 
-//             }
-
-//             arf_interval_clear(refined);
-//         }
-//         else
-//             ++found_unknown;
-//     }
-
-//     // Summary.
-//     flint_printf("---------------------------------------------------------------\n");
-//     flint_printf("Found roots: %wd\n", found_roots);
-//     flint_printf("Subintervals possibly containing undetected roots: %wd\n", found_unknown);
-//     flint_printf("Function evaluations: %wd\n", eval_count);
-
-//     // Cleanup.
-//     for (slong idx = 0; idx != num; ++idx)
-//         arf_interval_clear(blocks + idx);
-
-//     flint_free(blocks);
-//     flint_free(flags);
-//     arf_interval_clear(interval);
-//     arb_clear(approx);
-//     flint_cleanup();
-// }
