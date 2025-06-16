@@ -10,14 +10,14 @@ def F(x, P):
     return x
 
 # PARAMS
-P = 25
-xstep = 0.000001
+P = 4
+xstep = 0.0001
 
 
 
 
 
-xlim = P
+xlim = P - 1.8
 iList = np.arange(-xlim, xlim, xstep)
 xList = []
 prev = None

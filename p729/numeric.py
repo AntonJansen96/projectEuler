@@ -54,8 +54,8 @@ def find_roots(P, xlim=7.0, xstep=0.00001, tol=1e-12):
 
 
 if __name__ == "__main__":
-    P = 25
-    xlim = 7.0 # seems reasonable from plot.py with xstep = 0.00001
+    P = 4
+    xlim = 3.0 # seems reasonable from plot.py with xstep = 0.00001
     xstep = 0.0001
     tol = 1e-12
 

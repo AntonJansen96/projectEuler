@@ -9,9 +9,9 @@ static size_t eval_count = 0;  // Tracks how often the function was called/evalu
 
 class RootFinder
 {
-    size_t d_num = 0;
-    size_t d_found_roots = 0;
-    size_t d_found_unknown = 0;
+    size_t d_num = 0;           // Holds total number of intervals/roots.
+    size_t d_found_roots = 0;   // Number of actual roots found.
+    size_t d_found_unknown = 0; // Number of empty intervals (with potential root).
 
     arf_interval_ptr d_blocks;  // 1. Holds the root blocks.
     int *d_flags;               // 2. int array; one for each root.
@@ -27,6 +27,8 @@ class RootFinder
         ~RootFinder();
         // Run root finding.
         void run();
+
+    private:
         // Compute intervals.
         void compute_intervals();
         // Refine interval using bisection.
@@ -37,8 +39,6 @@ class RootFinder
         void printintervals();
         // Provide summary.
         void summary();
-
-    private:
         // Test function sin(x^2).
         static int sin_x2(arb_ptr out, arb_t const inp, void *param, slong order, slong prec);
         // My function for project Euler problem 729.
@@ -48,8 +48,8 @@ class RootFinder
 // Constructor.
 inline RootFinder::RootFinder(size_t P, double a, double b)
 :
-    // d_func(sin_x2),
-    d_func(myfunc),
+    // d_func(sin_x2),  // Test function sin(x^2).
+    d_func(myfunc),     // Actualy function for Project Euler problem 729.
     d_param(&P)
 {
     arf_interval_init(d_interval);
@@ -72,17 +72,21 @@ inline RootFinder::~RootFinder()
 // Run root finding.
 inline void RootFinder::run()
 {
-    stopwatch::Stopwatch timer;
-    timer.start();
+    stopwatch::Stopwatch timer1, timer2, timer3;
+    
+    timer1.start(); this->compute_intervals(); timer1.stop();
+    // this->printintervals(); // debug
 
-    this->compute_intervals();
-    // this->printintervals();
-    this->refine_bisect();
+    timer2.start(); this->refine_bisect(); timer2.stop();
     this->printintervals();
-    this->refine_newton();
+    
+    timer3.start(); this->refine_newton(); timer3.stop();
 
     this->summary();
-    print(fs("RootFinder took: {}", timer));
+    print(fs("Comput_intervals: {}", timer1));
+    print(fs("Refine_bisect     {}", timer2));
+    print(fs("Refine_newton:    {}", timer3));
+    print(fs("Total time:       {}", timer1 + timer2 + timer3));
 }
 
 // Compute intervals.
@@ -135,7 +139,7 @@ inline void RootFinder::refine_newton()
     {
         if (d_flags[idx] == 1)
         {
-            arf_interval_get_arb(root, d_blocks + idx, prec1);
+            arf_interval_get_arb(root, d_blocks + idx, prec1); // Midpoint.
             arb_calc_newton_conv_factor(conv_factor, d_func, d_param, root, prec1);
 
             if (arb_calc_refine_root_newton(root, d_func, d_param, root, root, conv_factor, eval_extra_prec, prec2) != ARB_CALC_SUCCESS)
@@ -157,9 +161,9 @@ inline void RootFinder::refine_newton()
 inline void RootFinder::printintervals()
 {
     // Tunable parameters.
-    size_t const digits = 10;
+    size_t const digits = 10; // This is fine, don't change.
+    
     size_t count = 1;
-
     arb_t d_temp;
     arb_init(d_temp);
 
@@ -167,13 +171,12 @@ inline void RootFinder::printintervals()
     {
         arf_interval_get_arb(d_temp, d_blocks + idx, digits);
 
-        if (d_flags[idx] == 1)
+        if (d_flags[idx] == 1) // Only print if we actually found a root in interval.
         {
             print(fs("{}. {}", count, arb_get_str(d_temp, digits, 0)));
             ++count;
         }
     }
-
     arb_clear(d_temp);
 }
 
