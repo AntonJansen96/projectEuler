@@ -16,11 +16,13 @@ class RootFinder
     size_t d_bisect_fail = 0;   // Number of bisection failures (debug variable).
     size_t d_newton_fail = 0;   // Number of Newton failures (debug variable).
 
+    size_t d_P;                 // Period.
     arf_interval_ptr d_blocks;  // 1. Holds the root blocks.
     int *d_flags;               // 2. int array; one for each root.
     arb_calc_func_t d_func;     // 3. function to find root for.
     void *d_param;              // 4. Function parameter(s).
-    arf_interval_t d_interval;  // 5. interval for searching the roots.
+    double const d_a;           // 5. interval for searching the roots [a, b].
+    double const d_b;
 
     public:
         // Constructor.
@@ -51,14 +53,13 @@ class RootFinder
 // Constructor.
 inline RootFinder::RootFinder(size_t P, double a, double b)
 :
+    d_P(P),    
     // d_func(sin_x2),  // Test function sin(x^2).
     d_func(myfunc),     // Actualy function for Project Euler problem 729.
-    d_param(&P)
-{
-    arf_interval_init(d_interval);
-    arf_set_d(&d_interval->a, a);
-    arf_set_d(&d_interval->b, b);
-}
+    d_param(&d_P),
+    d_a(a),
+    d_b(b)
+{}
 
 // Destructor.
 inline RootFinder::~RootFinder()
@@ -68,7 +69,6 @@ inline RootFinder::~RootFinder()
 
     flint_free(d_blocks);
     flint_free(d_flags);
-    arf_interval_clear(d_interval);
     flint_cleanup();
 }
 
@@ -86,10 +86,10 @@ inline void RootFinder::run()
     // timer3.start(); this->refine_newton(); timer3.stop();
 
     this->summary();
-    print(fs("Comput_intervals: {}", timer1));
-    print(fs("Refine_bisect     {}", timer2));
-    print(fs("Refine_newton:    {}", timer3));
-    print(fs("Total time:       {}", timer1 + timer2 + timer3));
+    print(fs("Compute_intervals: {}", timer1));
+    print(fs("Refine_bisect:     {}", timer2));
+    print(fs("Refine_newton:     {}", timer3));
+    print(fs("Total time:        {}", timer1 + timer2 + timer3));
 }
 
 // Compute intervals.
@@ -97,11 +97,16 @@ inline void RootFinder::compute_intervals()
 {
     // Tunable parameters.
     size_t const maxdepth = 30;         // Max #recursive subdivisions attempted (20-100).
-    size_t const maxeval = 10'000'000;  // Max #tested subintervals (10'000 - 1'000'000).
+    size_t const maxeval = 1'000'000;   // Max #tested subintervals (10'000 - 1'000'000).
     size_t const maxfound = LONG_MAX;   // Max found number of roots.
     size_t const prec = 128;            // Precision used during evaluation (30-200 bits).
 
-    d_num = arb_calc_isolate_roots(&d_blocks, &d_flags, d_func, d_param, d_interval, maxdepth, maxeval, maxfound, prec);
+    arf_interval_t interval;
+    arf_interval_init(interval);
+    arf_set_d(&interval->a, d_a);
+    arf_set_d(&interval->b, d_b);
+
+    d_num = arb_calc_isolate_roots(&d_blocks, &d_flags, d_func, d_param, interval, maxdepth, maxeval, maxfound, prec);
 
     for (size_t idx = 0; idx != d_num; ++idx)
     {
@@ -110,6 +115,8 @@ inline void RootFinder::compute_intervals()
         else
             ++d_found_roots;
     }
+
+    arf_interval_clear(interval);
 }
 
 // Refine interval using bisection.
@@ -191,11 +198,10 @@ inline void RootFinder::printintervals()
 // Provide summary.
 inline void RootFinder::summary()
 {
-    size_t const P = *static_cast<size_t*>(d_param);
-    size_t const theoretical = pow(2, P) - 2;
+    size_t const theoretical = pow(2, d_P) - 2;
 
     print("---------------------------------------------------------------");
-    print(fs("Found roots: {} (should be {} for P = {})", 2 * d_found_roots, theoretical, P));
+    print(fs("Found roots: {} (should be {} for P = {})", 2 * d_found_roots, theoretical, d_P));
     print(fs("Subintervals possibly containing undetected roots: {}", d_found_unknown));
     print(fs("Bisection failures: {}/{}", d_bisect_fail, d_found_roots));
     print(fs("Newton failures: {}/{}", d_newton_fail, d_found_roots));
@@ -274,8 +280,8 @@ int main()
 {
     // RootFinder(3, 0.001, 7.0).run();
     // RootFinder(10, -4.1, 4.1).run(); // Project Euler
-    // RootFinder(15, 0, 5.05).run(); // Project Euler
-    RootFinder(20, 0, 6.0).run(); // Project Euler
+    RootFinder(15, 0, 5.05).run(); // Project Euler
+    // RootFinder(20, 0, 6.0).run(); // Project Euler
 }
 
 // P = 3 (count = 6)
