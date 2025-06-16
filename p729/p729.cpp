@@ -5,20 +5,25 @@
 
 using namespace pythonlike;
 
-static slong eval_count = 0;  // Tracks how often the function was called/evaluated.
+static size_t eval_count = 0;  // Tracks how often the function was called/evaluated.
 
 class RootFinder
 {
-    slong d_num = 0;
+    size_t d_num = 0;
+    size_t d_found_roots = 0;
+    size_t d_found_unknown = 0;
+
+    arb_t d_temp;               // Temp variable used in printing function.
+
     arf_interval_ptr d_blocks;  // 1. Holds the root blocks.
     int *d_flags;               // 2. int array; one for each root.
     arb_calc_func_t d_func;     // 3. function to find root for.
     void *d_param;              // 4. Function parameter(s).
     arf_interval_t d_interval;  // 5. interval for searching the roots.
-    slong d_maxdepth;           // 6. Max #recursive subdivisions attempted.
-    slong d_maxeval;            // 7. Max #tested subintervals.
-    slong d_maxfound;           // 8. Max found number of roots.
-    slong d_prec;               // 9. Precision used for evaluation.
+    size_t d_maxdepth;          // 6. Max #recursive subdivisions attempted.
+    size_t d_maxeval;           // 7. Max #tested subintervals.
+    size_t d_maxfound;          // 8. Max found number of roots.
+    size_t d_prec;              // 9. Precision used for evaluation.
 
     public:
         // Constructor.
@@ -28,6 +33,10 @@ class RootFinder
         ~RootFinder();
         // Run root finding.
         void run();
+        // Provide summary.
+        void summary();
+        // Print the interval (midpoint).
+        void printinterval(size_t idx);
 
     private:
         // Test function sin(x).
@@ -46,6 +55,7 @@ inline RootFinder::RootFinder(size_t P, double a, double b)
     d_maxfound(LONG_MAX),
     d_prec(30)
 {
+    arb_init(d_temp);
     arf_interval_init(d_interval);
     arf_set_d(&d_interval->a, a);
     arf_set_d(&d_interval->b, b);
@@ -54,11 +64,12 @@ inline RootFinder::RootFinder(size_t P, double a, double b)
 // Destructor.
 inline RootFinder::~RootFinder()
 {
-    for (slong idx = 0; idx != d_num; ++idx)
+    for (size_t idx = 0; idx != d_num; ++idx)
         arf_interval_clear(d_blocks + idx);
 
     flint_free(d_blocks);
     flint_free(d_flags);
+    arb_clear(d_temp);
     arf_interval_clear(d_interval);
     flint_cleanup();
 }
@@ -66,7 +77,47 @@ inline RootFinder::~RootFinder()
 // Run root finding.
 inline void RootFinder::run()
 {
+    stopwatch::Stopwatch timer;
+    timer.start();
+
+    // Compute intervals (d_blocks, d_flags, d_num).
     d_num = arb_calc_isolate_roots(&d_blocks, &d_flags, d_func, d_param, d_interval, d_maxdepth, d_maxeval, d_maxfound, d_prec);
+
+    // Loop through each interval.
+    for (size_t idx = 0; idx != d_num; ++idx)
+    {
+        this->printinterval(idx);
+
+        if (d_flags[idx] != 1)
+        {
+            ++d_found_unknown;
+            continue;
+        }
+
+        ++d_found_roots;
+    }
+
+    this->summary();
+    print(fs("\nrun() took {}", timer));
+}
+
+// Print the interval (midpoint).
+void RootFinder::printinterval(size_t idx)
+{
+    arf_interval_get_arb(d_temp, d_blocks + idx, d_prec);
+    if (d_flags[idx] == 1)
+        print(fs("{}. {}", idx + 1, arb_get_str(d_temp, 10, 0)));
+    else
+        print(fs("{}. {} undetected", idx + 1, arb_get_str(d_temp, 10, 0)));
+}
+
+// Provide summary.
+inline void RootFinder::summary()
+{
+    print("---------------------------------------------------------------");
+    print(fs("Found roots: {}", d_found_roots));
+    print(fs("Subintervals possibly containing undetected roots: {}", d_found_unknown));
+    print(fs("Function evaluations: {}", eval_count));
 }
 
 // Test function sin(x).
@@ -87,7 +138,7 @@ inline int RootFinder::sin_x(arb_ptr out, const arb_t inp, void *param, slong or
 // My function for project Euler problem 729.
 inline int RootFinder::myfunc(arb_ptr out, const arb_t inp, void *param, slong order, slong prec)
 {
-    slong const P = *static_cast<slong*>(param); // This works correctly.
+    size_t const P = *static_cast<size_t*>(param); // This works correctly.
 
     arb_t x, invx;
     arb_init(x);
@@ -95,7 +146,7 @@ inline int RootFinder::myfunc(arb_ptr out, const arb_t inp, void *param, slong o
 
     arb_set(x, inp);
 
-    for (slong i = 0; i != P - 1; ++i)
+    for (size_t i = 0; i != P - 1; ++i)
     {
         arb_inv(invx, x, prec);    // invx = 1/x
         arb_sub(x, x, invx, prec); // x = x - 1/x
@@ -113,13 +164,9 @@ inline int RootFinder::myfunc(arb_ptr out, const arb_t inp, void *param, slong o
 
 int main()
 {
-    RootFinder program(25, 0, 7);
-    stopwatch::Stopwatch timer;
-    
-    timer.start(); program.run(); timer.stop();
-    print(fs("Program took {}", timer));
-    print(fs("Function was evaluated for {} times", eval_count));
+    RootFinder(3, -3.0, 3.0).run();
 }
+
 
 
 
