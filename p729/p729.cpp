@@ -1,5 +1,6 @@
 #include <flint/arb_poly.h>
 #include <flint/arb_calc.h>
+#include <omp.h>
 #include "cpplib/pythonlike.h"
 #include "cpplib/stopwatch.h"
 
@@ -12,6 +13,8 @@ class RootFinder
     size_t d_num = 0;           // Holds total number of intervals/roots.
     size_t d_found_roots = 0;   // Number of actual roots found.
     size_t d_found_unknown = 0; // Number of empty intervals (with potential root).
+    size_t d_bisect_fail = 0;   // Number of bisection failures (debug variable).
+    size_t d_newton_fail = 0;   // Number of Newton failures (debug variable).
 
     arf_interval_ptr d_blocks;  // 1. Holds the root blocks.
     int *d_flags;               // 2. int array; one for each root.
@@ -77,10 +80,10 @@ inline void RootFinder::run()
     timer1.start(); this->compute_intervals(); timer1.stop();
     // this->printintervals(); // debug
 
-    timer2.start(); this->refine_bisect(); timer2.stop();
-    this->printintervals();
+    // timer2.start(); this->refine_bisect(); timer2.stop();
+    // this->printintervals();
     
-    timer3.start(); this->refine_newton(); timer3.stop();
+    // timer3.start(); this->refine_newton(); timer3.stop();
 
     this->summary();
     print(fs("Comput_intervals: {}", timer1));
@@ -93,10 +96,10 @@ inline void RootFinder::run()
 inline void RootFinder::compute_intervals()
 {
     // Tunable parameters.
-    size_t const maxdepth = 20;         // Max #recursive subdivisions attempted (20-100).
-    size_t const maxeval = 1'000'000;   // Max #tested subintervals (10'000 - 1'000'000).
+    size_t const maxdepth = 30;         // Max #recursive subdivisions attempted (20-100).
+    size_t const maxeval = 10'000'000;  // Max #tested subintervals (10'000 - 1'000'000).
     size_t const maxfound = LONG_MAX;   // Max found number of roots.
-    size_t const prec = 64;             // Precision used during evaluation (30-200 bits).
+    size_t const prec = 128;            // Precision used during evaluation (30-200 bits).
 
     d_num = arb_calc_isolate_roots(&d_blocks, &d_flags, d_func, d_param, d_interval, maxdepth, maxeval, maxfound, prec);
 
@@ -117,16 +120,20 @@ inline void RootFinder::refine_bisect()
     size_t const prec = 64;   // Working precision for interval arithmetic (30-200 bits).
 
     for (size_t idx = 0; idx != d_num; ++idx)
-        if (d_flags[idx] == 1)
-            if (arb_calc_refine_root_bisect(d_blocks + idx, d_func, d_param, d_blocks + idx, iter, prec) != ARB_CALC_SUCCESS)
-                print(fs("WARNING: refine_bisect failed for root interval idx = {}", idx));
+    {
+        if (d_flags[idx] == 1 && arb_calc_refine_root_bisect(d_blocks + idx, d_func, d_param, d_blocks + idx, iter, prec) != ARB_CALC_SUCCESS)
+        {
+            print(fs("WARNING: refine_bisect failed for root interval idx = {}", idx));
+            ++d_bisect_fail;
+        }
+    }
 }
 
 inline void RootFinder::refine_newton()
 {
     // Tunable parameters.
     size_t const eval_extra_prec = 5;   // Extra prec to use internally during calc.
-    size_t const prec1 = 64;            // Precision used when converting (30-200 bits).
+    size_t const prec1 = 128;           // Precision used when converting (30-200 bits).
     size_t const prec2 = 200;           // Target Precision of after Newton (64-500 bits).
 
     arb_t root;
@@ -145,6 +152,7 @@ inline void RootFinder::refine_newton()
             if (arb_calc_refine_root_newton(root, d_func, d_param, root, root, conv_factor, eval_extra_prec, prec2) != ARB_CALC_SUCCESS)
             {
                 print(fs("WARNING: refine_newton failed for d_blocks[{}]", idx));
+                ++d_newton_fail;
             }
             else
             {
@@ -183,9 +191,14 @@ inline void RootFinder::printintervals()
 // Provide summary.
 inline void RootFinder::summary()
 {
+    size_t const P = *static_cast<size_t*>(d_param);
+    size_t const theoretical = pow(2, P) - 2;
+
     print("---------------------------------------------------------------");
-    print(fs("Found roots: {}", d_found_roots));
+    print(fs("Found roots: {} (should be {} for P = {})", 2 * d_found_roots, theoretical, P));
     print(fs("Subintervals possibly containing undetected roots: {}", d_found_unknown));
+    print(fs("Bisection failures: {}/{}", d_bisect_fail, d_found_roots));
+    print(fs("Newton failures: {}/{}", d_newton_fail, d_found_roots));
     print(fs("Function evaluations: {}", eval_count));
 }
 
@@ -260,7 +273,9 @@ inline int RootFinder::myfunc(arb_ptr out, const arb_t inp, void *param, slong o
 int main()
 {
     // RootFinder(3, 0.001, 7.0).run();
-    RootFinder(3, -2, 2).run(); // Project Euler
+    // RootFinder(10, -4.1, 4.1).run(); // Project Euler
+    // RootFinder(15, 0, 5.05).run(); // Project Euler
+    RootFinder(20, 0, 6.0).run(); // Project Euler
 }
 
 // P = 3 (count = 6)
