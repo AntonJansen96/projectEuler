@@ -14,6 +14,7 @@ class RootFinder
     size_t d_found_unknown = 0;
 
     arb_t d_temp;               // Temp variable used in printing function.
+    arf_interval_t d_refined;   // Temp interval struct for refining.
 
     arf_interval_ptr d_blocks;  // 1. Holds the root blocks.
     int *d_flags;               // 2. int array; one for each root.
@@ -33,14 +34,16 @@ class RootFinder
         ~RootFinder();
         // Run root finding.
         void run();
-        // Provide summary.
-        void summary();
+        // Refine the interval.
+        void refine(size_t idx);
         // Print the interval (midpoint).
         void printinterval(size_t idx);
+        // Provide summary.
+        void summary();
 
     private:
-        // Test function sin(x).
-        static int sin_x(arb_ptr out, arb_t const inp, void *param, slong order, slong prec);
+        // Test function sin(x^2).
+        static int sin_x2(arb_ptr out, arb_t const inp, void *param, slong order, slong prec);
         // My function for project Euler problem 729.
         static int myfunc(arb_ptr out, arb_t const inp, void *param, slong order, slong prec);
 };
@@ -48,7 +51,7 @@ class RootFinder
 // Constructor.
 inline RootFinder::RootFinder(size_t P, double a, double b)
 :
-    d_func(myfunc),
+    d_func(sin_x2),
     d_param(&P),
     d_maxdepth(20),
     d_maxeval(100000),
@@ -56,6 +59,7 @@ inline RootFinder::RootFinder(size_t P, double a, double b)
     d_prec(30)
 {
     arb_init(d_temp);
+    arf_interval_init(d_refined);
     arf_interval_init(d_interval);
     arf_set_d(&d_interval->a, a);
     arf_set_d(&d_interval->b, b);
@@ -70,6 +74,7 @@ inline RootFinder::~RootFinder()
     flint_free(d_blocks);
     flint_free(d_flags);
     arb_clear(d_temp);
+    arf_interval_clear(d_refined);
     arf_interval_clear(d_interval);
     flint_cleanup();
 }
@@ -87,11 +92,12 @@ inline void RootFinder::run()
     for (size_t idx = 0; idx != d_num; ++idx)
     {
         this->printinterval(idx);
+        // this->refine(idx);
+        // this->printinterval(idx);
 
         if (d_flags[idx] != 1)
         {
             ++d_found_unknown;
-            continue;
         }
 
         ++d_found_roots;
@@ -101,8 +107,33 @@ inline void RootFinder::run()
     print(fs("\nrun() took {}", timer));
 }
 
+inline void RootFinder::refine(size_t idx)
+{
+    // Refines root interval entry idx in d_blocks array using bisection.
+    size_t const iter = 10;
+    arb_calc_refine_root_bisect(d_blocks + idx, myfunc, d_param, d_blocks + idx, iter, d_prec);
+
+    // // Refines root interval entry idx in d_block array using Newton's method.
+    // arb_t root;
+    // arb_init(root);
+    // arf_interval_get_arb(root, d_blocks + idx, d_prec); // Root now holds starting midpoint.
+
+    // arf_t conv_factor;
+    // arf_init(conv_factor);
+    // arb_calc_newton_conv_factor(conv_factor, myfunc, d_param, root, d_prec); // Conv factor now holds conversion factor.
+
+    // if (arb_calc_refine_root_newton(root, myfunc, d_param, root, root, conv_factor, 10, d_prec) == ARB_CALC_SUCCESS)
+    // {
+    //     print("Newton's method ran succesfully");
+    //     print(arb_get_str(root, 50, 0));
+    // }
+
+    // arb_clear(root);
+    // arf_clear(conv_factor);
+}
+
 // Print the interval (midpoint).
-void RootFinder::printinterval(size_t idx)
+inline void RootFinder::printinterval(size_t idx)
 {
     arf_interval_get_arb(d_temp, d_blocks + idx, d_prec);
     if (d_flags[idx] == 1)
@@ -120,16 +151,24 @@ inline void RootFinder::summary()
     print(fs("Function evaluations: {}", eval_count));
 }
 
-// Test function sin(x).
-inline int RootFinder::sin_x(arb_ptr out, const arb_t inp, void *param, slong order, slong prec)
+// Test function sin(x^2).
+inline int RootFinder::sin_x2(arb_ptr out, arb_t const inp, void *param, slong order, slong prec)
 {
+    arb_ptr x;
+
     int xlen = FLINT_MIN(2, order);
+    int ylen = FLINT_MIN(3, order);
 
-    arb_set(out, inp);
+    x = _arb_vec_init(xlen);
+
+    arb_set(x, inp);
     if (xlen > 1)
-        arb_one(out + 1);
+        arb_one(x + 1);
 
-    _arb_poly_sin_series(out, out, xlen, order, prec);
+    _arb_poly_mullow(out, x, xlen, x, xlen, ylen, prec);
+    _arb_poly_sin_series(out, out, ylen, order, prec);
+
+    _arb_vec_clear(x, xlen);
 
     ++eval_count;
     return 0;
@@ -164,7 +203,7 @@ inline int RootFinder::myfunc(arb_ptr out, const arb_t inp, void *param, slong o
 
 int main()
 {
-    RootFinder(3, -3.0, 3.0).run();
+    RootFinder(3, 0.001, 7.0).run();
 }
 
 
