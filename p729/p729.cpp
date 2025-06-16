@@ -48,8 +48,8 @@ class RootFinder
 // Constructor.
 inline RootFinder::RootFinder(size_t P, double a, double b)
 :
-    d_func(sin_x2),
-    // d_func(myfunc),
+    // d_func(sin_x2),
+    d_func(myfunc),
     d_param(&P)
 {
     arf_interval_init(d_interval);
@@ -76,6 +76,7 @@ inline void RootFinder::run()
     timer.start();
 
     this->compute_intervals();
+    // this->printintervals();
     this->refine_bisect();
     this->printintervals();
     this->refine_newton();
@@ -112,8 +113,9 @@ inline void RootFinder::refine_bisect()
     size_t const prec = 64;   // Working precision for interval arithmetic (30-200 bits).
 
     for (size_t idx = 0; idx != d_num; ++idx)
-        if (arb_calc_refine_root_bisect(d_blocks + idx, d_func, d_param, d_blocks + idx, iter, prec) != ARB_CALC_SUCCESS)
-            print(fs("WARNING: refine_bisect failed for root interval #{}", idx + 1));
+        if (d_flags[idx] == 1)
+            if (arb_calc_refine_root_bisect(d_blocks + idx, d_func, d_param, d_blocks + idx, iter, prec) != ARB_CALC_SUCCESS)
+                print(fs("WARNING: refine_bisect failed for root interval idx = {}", idx));
 }
 
 inline void RootFinder::refine_newton()
@@ -128,17 +130,25 @@ inline void RootFinder::refine_newton()
     arf_t conv_factor;
     arf_init(conv_factor);
 
+    size_t count = 1;
     for (size_t idx = 0; idx != d_num; ++idx)
     {
-        arf_interval_get_arb(root, d_blocks + idx, prec1);
-        arb_calc_newton_conv_factor(conv_factor, d_func, d_param, root, prec1);
+        if (d_flags[idx] == 1)
+        {
+            arf_interval_get_arb(root, d_blocks + idx, prec1);
+            arb_calc_newton_conv_factor(conv_factor, d_func, d_param, root, prec1);
 
-        if (arb_calc_refine_root_newton(root, d_func, d_param, root, root, conv_factor, eval_extra_prec, prec2) != ARB_CALC_SUCCESS)
-            print(fs("WARNING: refine_newton failed for root interval #{}", idx + 1));
-        else
-            print(fs("{}. {}", idx + 1, arb_get_str(root, prec2, 0)));
+            if (arb_calc_refine_root_newton(root, d_func, d_param, root, root, conv_factor, eval_extra_prec, prec2) != ARB_CALC_SUCCESS)
+            {
+                print(fs("WARNING: refine_newton failed for d_blocks[{}]", idx));
+            }
+            else
+            {
+                print(fs("{}. {}", count, arb_get_str(root, prec2, 0)));
+                ++count;
+            }
+        }
     }
-
     arb_clear(root);
     arf_clear(conv_factor);
 }
@@ -148,6 +158,7 @@ inline void RootFinder::printintervals()
 {
     // Tunable parameters.
     size_t const digits = 10;
+    size_t count = 1;
 
     arb_t d_temp;
     arb_init(d_temp);
@@ -157,9 +168,10 @@ inline void RootFinder::printintervals()
         arf_interval_get_arb(d_temp, d_blocks + idx, digits);
 
         if (d_flags[idx] == 1)
-            print(fs("{}. {}", idx + 1, arb_get_str(d_temp, digits, 0)));
-        else
-            print(fs("{}. {} undetected", idx + 1, arb_get_str(d_temp, digits, 0)));
+        {
+            print(fs("{}. {}", count, arb_get_str(d_temp, digits, 0)));
+            ++count;
+        }
     }
 
     arb_clear(d_temp);
@@ -200,25 +212,43 @@ inline int RootFinder::sin_x2(arb_ptr out, arb_t const inp, void *param, slong o
 // My function for project Euler problem 729.
 inline int RootFinder::myfunc(arb_ptr out, const arb_t inp, void *param, slong order, slong prec)
 {
-    size_t const P = *static_cast<size_t*>(param); // This works correctly.
+    size_t const P = *static_cast<size_t*>(param);
 
-    arb_t x, invx;
-    arb_init(x);
-    arb_init(invx);
-
+    // Initialize x as the power series for the variable centered at inp
+    arb_ptr x = _arb_vec_init(order);
     arb_set(x, inp);
+    if (order > 1)
+        arb_one(x + 1);
+    for (slong i = 2; i < order; ++i)
+        arb_zero(x + i);
 
-    for (size_t i = 0; i != P - 1; ++i)
+    // Compose the map P times as a power series
+    for (size_t i = 0; i < P; ++i)
     {
-        arb_inv(invx, x, prec);    // invx = 1/x
-        arb_sub(x, x, invx, prec); // x = x - 1/x
+        arb_ptr invx = _arb_vec_init(order);
+        _arb_poly_inv_series(invx, x, order, order, prec);
+
+        arb_ptr next = _arb_vec_init(order);
+        _arb_vec_sub(next, x, invx, order, prec);
+
+        _arb_vec_clear(x, order);
+        _arb_vec_clear(invx, order);
+
+        x = next;
     }
 
-    // out = x - inp
-    arb_sub(out, x, inp, prec);
+    // Subtract the original power series (the variable) from the result
+    arb_ptr var = _arb_vec_init(order);
+    arb_set(var, inp);
+    if (order > 1)
+        arb_one(var + 1);
+    for (slong i = 2; i < order; ++i)
+        arb_zero(var + i);
 
-    arb_clear(x);
-    arb_clear(invx);
+    _arb_vec_sub(out, x, var, order, prec);
+
+    _arb_vec_clear(x, order);
+    _arb_vec_clear(var, order);
 
     ++eval_count;
     return 0;
@@ -226,6 +256,30 @@ inline int RootFinder::myfunc(arb_ptr out, const arb_t inp, void *param, slong o
 
 int main()
 {
-    RootFinder(3, 0.001, 7.0).run();
-    // RootFinder(3, -2, 2).run(); // Project Euler
+    // RootFinder(3, 0.001, 7.0).run();
+    RootFinder(3, -2, 2).run(); // Project Euler
 }
+
+// P = 3 (count = 6)
+// -1.4619022001
+// -0.7778619134
+// -0.5077133059
+//  0.5077133059
+//  0.7778619134
+//  1.4619022001
+
+// P = 4 (count = 14)
+// -1.9890437907
+// -1.4862896510
+// -1.3065629649
+// -0.8134732862
+// -0.7071067819
+// -0.5411961001
+// -0.4158233816
+//  0.4158233816
+//  0.5411961001
+//  0.7071067819
+//  0.8134732862
+//  1.3065629649
+//  1.4862896510
+//  1.9890437907
