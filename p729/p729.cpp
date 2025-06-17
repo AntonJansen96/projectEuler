@@ -100,14 +100,61 @@ inline void RootFinder::compute_intervals()
     size_t const maxeval = 1'000'000;   // Max #tested subintervals (10'000 - 1'000'000).
     size_t const maxfound = LONG_MAX;   // Max found number of roots.
     size_t const prec = 128;            // Precision used during evaluation (30-200 bits).
+    size_t const subintervals = 1000;   // To tune multithreading.
 
-    arf_interval_t interval;
-    arf_interval_init(interval);
-    arf_set_d(&interval->a, d_a);
-    arf_set_d(&interval->b, d_b);
+    // Initialize blocks_vector, flags_vector, interval_vector, blocks vector.
+    // These will function kind of like a starmap in Python multiprocessing.
+    std::vector<arf_interval_ptr> blocks_vector(subintervals);
+    std::vector<int*> flags_vector(subintervals);
+    std::vector<arf_interval_struct> interval_vector;
+    std::vector<size_t> block_counts(subintervals);
 
-    d_num = arb_calc_isolate_roots(&d_blocks, &d_flags, d_func, d_param, interval, maxdepth, maxeval, maxfound, prec);
+    // Set up the interval vector.
+    for (size_t idx = 0; idx != subintervals; ++idx)
+    {
+        arf_interval_struct interval;
+        arf_interval_init(&interval);
 
+        double width = (d_b - d_a) / subintervals;
+        double x = d_a + idx * width;
+        double y = d_a + (idx + 1) * width;
+        arf_set_d(&interval.a, x);
+        arf_set_d(&interval.b, y);
+
+        interval_vector.push_back(interval);
+    }
+
+    // Multithreaded execution of arb_calc_isolate_roots.
+    #pragma omp parallel for schedule(dynamic)
+    for (size_t idx = 0; idx != subintervals; ++idx)
+    {
+        block_counts[idx] = arb_calc_isolate_roots(&(blocks_vector[idx]), &(flags_vector[idx]), d_func, d_param, &interval_vector[idx], maxdepth, maxeval, maxfound, prec);;
+    }
+
+    // Reduce block_counts to d_num.
+    d_num = sum(block_counts);
+
+    // Reduce blocks_vector into d_blocks and flags_vector into d_flags.
+    d_blocks = (arf_interval_ptr)flint_malloc(d_num * sizeof(arf_interval_struct));
+    d_flags = (int*)flint_malloc(d_num * sizeof(int));
+
+    size_t pos = 0;
+    for (size_t idx = 0; idx != subintervals; ++idx)
+    {
+        for (size_t j = 0; j != block_counts[idx]; ++j)
+        {
+            arf_interval_init(d_blocks + pos); // Copy interval
+            arf_interval_set(d_blocks + pos, blocks_vector[idx] + j);
+            d_flags[pos] = flags_vector[idx][j]; // Copy flag
+            ++pos;
+        }
+    }
+
+    // Free objects in interval_vector.
+    for (auto &interval : interval_vector)
+        arf_interval_clear(&interval);
+
+    // Count roots and unknowns as per usual.
     for (size_t idx = 0; idx != d_num; ++idx)
     {
         if (d_flags[idx] != 1)
@@ -115,8 +162,6 @@ inline void RootFinder::compute_intervals()
         else
             ++d_found_roots;
     }
-
-    arf_interval_clear(interval);
 }
 
 // Refine interval using bisection.
