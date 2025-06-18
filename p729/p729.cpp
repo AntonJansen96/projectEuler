@@ -1,11 +1,11 @@
 #include <atomic>
+#include <cmath>
+#include <iostream>
 #include <omp.h>
+#include <vector>
 #include <flint/arb_poly.h>
 #include <flint/arb_calc.h>
-#include <cpplib/pythonlike.h>
-#include <cpplib/stopwatch.h>
-
-using namespace pythonlike;
+#include <cpplib/stopwatch.h> // Can safely comment out if you don't have this.
 
 struct RootFinderResult
 {
@@ -111,7 +111,7 @@ inline void RootFinder::refine_bisect()
     {
         if (d_flags[idx] == 1 && arb_calc_refine_root_bisect(d_blocks + idx, d_func, d_param, d_blocks + idx, iter, prec) != ARB_CALC_SUCCESS)
         {
-            print(fs("WARNING: refine_bisect failed for root interval idx = {}", idx));
+            std::cout << "WARNING: refine_bisect failed" << std::endl;
             ++d_bisect_fail;
         }
     }
@@ -230,7 +230,7 @@ class Orbitrange
 int main()
 {
     omp_set_num_threads(4);              // Number of threads to use.
-    size_t const Pmax = 10;              // Compute S(Pmax).
+    size_t const Pmax = 25;              // Compute S(Pmax).
 
     // These parameters for b and intervals find all roots for P <= 25 (checked).
     double const b = 6.75;               // interval limit [0, b].
@@ -241,7 +241,9 @@ int main()
         theoretical += pow(2, n) - 2;    // This is 67108812 for P = 25.
 
     // Class that handles progress tracking.
+    #ifdef CPPLIB_STOPWATCH_H
     stopwatch::ProgressReport report(theoretical);
+    #endif
 
     // Declare and initialze Sarray vector containing arb_t objects.
     std::vector<arb_t> Sarray(Pmax + 1);
@@ -296,7 +298,9 @@ int main()
                 }
 
                 total_found_roots += result.found_roots;
+                #ifdef CPPLIB_STOPWATCH_H
                 report.tick(2 * result.found_roots); // 2x since interval [0, b].
+                #endif
 
                 arb_clear(root);
                 arb_clear(range1);
@@ -310,16 +314,20 @@ int main()
             arb_clear(local_sum);
         }
 
-        // Allow progress thread to catch up for nicer output formatting.
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        #ifdef CPPLIB_STOPWATCH_H
+        stopwatch::sleep(0.1); // Allow progthread to catch up for better formatting.
+        #endif
 
         // User update.
         size_t const theoretical_P = pow(2, P) - 2;
         double const ratio = 200 * total_found_roots / static_cast<double>(theoretical_P);
-        print(fs("P = {} | Found roots: {}/{} ({}%)", P, 2 * total_found_roots, theoretical_P, ratio));
+        std::cout << "P = " << P << " | Found roots: " << 2 * total_found_roots 
+                  << "/" << theoretical_P << " (" << ratio << "%)" << std::endl;
     }
 
+    #ifdef CPPLIB_STOPWATCH_H
     report.join();                  // Finish the progress report.
+    #endif
 
     Orbitrange orbit;               // Perform the correction for
     orbit.correct(Sarray);          // the orbit multiplicity.
@@ -327,14 +335,14 @@ int main()
     arb_t total;                    // Print Sarray and compute the sum.
     arb_init(total);
     arb_zero(total);
-    print("\nSarray:");
+    std::cout << "\nSarray:" << std::endl;
     for (size_t idx = 0; idx != Sarray.size(); ++idx)
     {
-        print(idx, arb_get_str(Sarray[idx], 200, 0));
+        std::cout << idx << ' ' << arb_get_str(Sarray[idx], 200, 0) << std::endl;
         arb_add(total, total, Sarray[idx], 200);
     }
 
-    print(fs("sum: {}", arb_get_str(total, 200, 0)));   // Final answer.
+    std::cout << "sum: " << arb_get_str(total, 200, 0) << std::endl;
 
     arb_clear(total);               // Clear and free memory.
     for (arb_t &obj : Sarray)
