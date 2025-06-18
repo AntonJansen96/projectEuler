@@ -10,6 +10,14 @@ using namespace pythonlike;
 
 static size_t eval_count = 0;  // Tracks how often the function was called/evaluated.
 
+struct RootFinderResult
+{
+    size_t num;
+    size_t found_roots;
+    arf_interval_ptr blocks;
+    int *flags;
+};
+
 class RootFinder
 {
     size_t d_num = 0;           // Holds total number of intervals/roots.
@@ -33,7 +41,7 @@ class RootFinder
         // Destructor.
         ~RootFinder();
         // Run root finding.
-        size_t run();
+        RootFinderResult run();
 
     private:
         // Compute intervals.
@@ -75,36 +83,20 @@ inline RootFinder::~RootFinder()
 }
 
 // Run root finding.
-inline size_t RootFinder::run()
+inline RootFinderResult RootFinder::run()
 {
-    // stopwatch::Stopwatch timer1, timer2, timer3;
-
-    // timer1.start(); 
     this->compute_intervals(); 
-    // timer1.stop();
-    // this->printintervals(); // debug
+    this->refine_bisect();
 
-    // timer2.start(); 
-    // this->refine_bisect(); 
-    // timer2.stop();
-    // this->printintervals(); // debug
-
-    // timer3.start();
-    // this->refine_newton();
-    // timer3.stop();
-
-    // this->summary();
-    // print(fs("Compute_intervals: {}", timer1));
-    // print(fs("Refine_bisect:     {}", timer2));
-    // print(fs("Refine_newton:     {}", timer3));
-    // print(fs("Total time:        {}", timer1 + timer2 + timer3));
-    return d_found_roots;
+    return RootFinderResult{d_num, d_found_roots, d_blocks, d_flags};
 }
 
 // Compute intervals.
 inline void RootFinder::compute_intervals()
 {
     // Tunable parameters.
+    // Together with intervals = 50000, these parameters I have checked to 
+    // provide all roots for P = 25 (and therefore any P < 25). DO NOT MODIFY.
     size_t const maxdepth = 30;         // Max #recursive subdivisions attempted (20-100).
     size_t const maxeval = 1'000'000;   // Max #tested subintervals (10'000 - 1'000'000).
     size_t const maxfound = LONG_MAX;   // Max found number of roots.
@@ -132,7 +124,7 @@ inline void RootFinder::compute_intervals()
 inline void RootFinder::refine_bisect()
 {
     // Tunable parameters.
-    size_t const iter = 10;   // Number of bisection steps per interval (5-100).
+    size_t const iter = 75;   // Number of bisection steps per interval (5-100).
     size_t const prec = 128;  // Working precision for interval arithmetic (30-200 bits).
 
     for (size_t idx = 0; idx != d_num; ++idx)
@@ -414,48 +406,117 @@ class Orbitrange
         }
 };
 
-int main() // root interval finding only ~ 40min.
-{
+// int main() // debug Newton.
+// {
+//     RootFinder(10, 0, 6.75).run();
+// }
+
+int main()
+{   
+    omp_set_num_threads(4);             // Number of threads to use.
+    size_t const Pmax = 5;              // Compute S(Pmax).
+
     // These parameters for b and intervals find all roots for P <= 25 (checked).
+
     double const b = 6.75;               // interval limit [0, b].
     size_t const intervals = 50000;      // Number of subintervals to multithread.
 
-    size_t total_found_roots = 0;        // Absolute total #roots to be found.
-    size_t const theoretical = 67108812; // sum_2^25(A000918) = 67108812.
+    size_t theoretical = 0;              // Theoretical total #roots up to Pmax.
+    for (size_t n = 2; n <= Pmax; ++n)   // This sum(https://oeis.org/A000918).
+        theoretical += pow(2, n) - 2;    // This is 67108812 for P = 25.
 
-    stopwatch::ProgressReport report(theoretical);
-    stopwatch::Stopwatch timer;
+    // Class that handles progress tracking.
+    stopwatch::ProgressReport report(theoretical);  
 
-    for (size_t P : range(2, 25 + 1))
+    // Class that handles calculation of orbit ranges and multiplicity correction.
+    Orbitrange orbit;                    
+    
+    // Declare and initialze Sarray vector containing arb_t objects.
+    std::vector<arb_t> Sarray(Pmax + 1);  
+    for (auto &obj : Sarray)            
+    {
+        arb_init(obj);                  // Initialize arb_t obj in Sarray.
+        arb_zero(obj);                  // Set value to 0.
+    }
+
+    arb_t root, range1, range2;         // Store intermediate values.
+    arb_init(root);
+    arb_init(range1);
+    arb_init(range2);
+    
+    for (size_t P = 2; P <= Pmax; ++P)  // Main loop starts here.
     {
         // Total number of roots found for given P. Should correspond to A000918.
-        std::atomic<size_t> total_found_roots_per_P{0};
+        std::atomic<size_t> total_found_roots{0};
 
-        timer.start();
+        // Multithreaded loop over the subdivided interval.
         #pragma omp parallel for schedule(dynamic)
         for (size_t idx = 0; idx != intervals; ++idx)
         {
-            double const width = b / intervals;
-            double const x = idx * width;
-            double const y = (idx + 1) * width;
+            double const width = b / intervals;     // Compute x and y
+            double const x = idx * width;           // for this specific
+            double const y = (idx + 1) * width;     // interval.
 
-            size_t const found = RootFinder(P, x, y).run();
-            total_found_roots_per_P += found;
+            RootFinder calc(P, x, y);
+            RootFinderResult const result = calc.run();
 
-            report.tick(2 * found); // 2x since interval [0, b].
+            // Loop through all the intervals...
+            for (size_t ii = 0; ii != result.num; ++ii)
+            {   // Only consider intervals with a root...
+                if (result.flags[ii] == 1) 
+                {   // Convert from arf_interval to arb_t.
+                    arf_interval_get_arb(root, result.blocks + ii, 128);
+                    orbit.range(range1, root, P);  // range from positive root
+                    arb_neg(root, root);           // swap root sign
+                    orbit.range(range2, root, P);  // range from negative root
+
+                    arb_add(Sarray[P], Sarray[P], range1, 128);
+                    arb_add(Sarray[P], Sarray[P], range2, 128);
+                }
+            }
+            total_found_roots += result.found_roots;
+            report.tick(2 * result.found_roots); // 2x since interval [0, b].
         }
-        timer.stop();
 
-        stopwatch::sleep(0.1); // allow progress thread to catch up for nicer output formatting.
-        size_t const theoretical = pow(2, P) - 2;
-        double const ratio = 200 * total_found_roots_per_P / static_cast<double>(theoretical);
-        print(fs("P = {} | Found roots: {}/{} ({}%) in {}", P, 2 * total_found_roots_per_P, theoretical, ratio, timer));
+        // Allow progress thread to catch up for nicer output formatting.
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-        total_found_roots += total_found_roots_per_P;
-        timer.reset();
+        // User update.
+        size_t const theoretical_P = pow(2, P) - 2;
+        double const ratio = 200 * total_found_roots / static_cast<double>(theoretical_P);
+        print(fs("P = {} | Found roots: {}/{} ({}%)", P, 2 * total_found_roots, theoretical_P, ratio));
     }
+
+    // Finish the progress report.
     report.join();
 
-    double const ratio = 200 * total_found_roots / static_cast<double>(theoretical);
-    print(fs("Total | Found roots: {}/{} ({}%)", 2 * total_found_roots, theoretical, ratio));
+    // Perform the correction for the orbit multiplicity.
+    orbit.correct(Sarray);
+
+    // Print Sarray and compute the sum.
+    arb_t total;
+    arb_init(total);
+    arb_zero(total);
+    print("\nSarray:");
+    for (size_t idx = 0; idx != Sarray.size(); ++idx)
+    {
+        print(idx, arb_get_str(Sarray[idx], 128, 0));
+        arb_add(total, total, Sarray[idx], 128);
+    }
+
+    // Print final answer.
+    print(fs("sum: {}", arb_get_str(total, 128, 0)));
+
+    // Clear and free memory.
+    arb_clear(root);                    
+    arb_clear(range1);
+    arb_clear(range2);
+    arb_clear(total);
+
+    for (arb_t &obj : Sarray)
+        arb_clear(obj);
 }
+
+// root interval finding only (8 threads) ~ 40min.
+// root interval finding + bisection[10 iter, 128 bits] (4 threads) ~ 51min.
+// root interval finding + bisection[75 iter, 128 bits] (4 threads) ~ 51min.
