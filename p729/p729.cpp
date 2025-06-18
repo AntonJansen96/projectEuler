@@ -104,8 +104,8 @@ inline void RootFinder::compute_intervals()
 // Refine interval using bisection.
 inline void RootFinder::refine_bisect()
 {
-    size_t const iter = 75;   // Number of bisection steps per interval (5-100).
-    size_t const prec = 200;  // Working precision for interval arithmetic (30-200 bits).
+    size_t const iter = 70;   // Number of bisection steps per interval (5-100).
+    size_t const prec = 192;  // Working precision for interval arithmetic (30-200 bits).
 
     for (size_t idx = 0; idx != d_num; ++idx)
     {
@@ -175,7 +175,7 @@ inline int RootFinder::func(arb_ptr out, const arb_t inp, void* param, slong ord
 class Orbitrange
 {
     arb_t root, max, min, inv_root;
-    size_t const d_prec = 200;
+    size_t const d_prec = 192;
 
     public:
         Orbitrange()
@@ -238,7 +238,7 @@ class Orbitrange
 
 int main()
 {
-    omp_set_num_threads(4);              // Number of threads to use.
+    omp_set_num_threads(8);              // Number of threads to use.
     size_t const Pmax = 25;              // Compute S(Pmax).
 
     // These parameters for b and intervals find all roots for P <= 25 (checked).
@@ -296,13 +296,13 @@ int main()
                 {   // Only consider intervals with a root...
                     if (result.flags[ii] == 1)
                     {   // Convert from arf_interval to arb_t.
-                        arf_interval_get_arb(root, result.blocks + ii, 200);
+                        arf_interval_get_arb(root, result.blocks + ii, 192);
                         orbit.range(range1, root, P);  // range from positive root
                         arb_neg(root, root);           // swap root sign
                         orbit.range(range2, root, P);  // range from negative root
 
-                        arb_add(local_sum, local_sum, range1, 200);
-                        arb_add(local_sum, local_sum, range2, 200);
+                        arb_add(local_sum, local_sum, range1, 192);
+                        arb_add(local_sum, local_sum, range2, 192);
                     }
                 }
 
@@ -318,7 +318,7 @@ int main()
 
             #pragma omp critical
             {
-                arb_add(Sarray[P], Sarray[P], local_sum, 200);
+                arb_add(Sarray[P], Sarray[P], local_sum, 192);
             }
             arb_clear(local_sum);
         }
@@ -347,11 +347,11 @@ int main()
     std::cout << "\nSarray:" << std::endl;
     for (size_t idx = 0; idx != Sarray.size(); ++idx)
     {
-        std::cout << idx << ' ' << arb_get_str(Sarray[idx], 200, 0) << std::endl;
-        arb_add(total, total, Sarray[idx], 200);
+        std::cout << idx << ' ' << arb_get_str(Sarray[idx], 192, 0) << std::endl;
+        arb_add(total, total, Sarray[idx], 192);
     }
 
-    std::cout << "sum: " << arb_get_str(total, 200, 0) << std::endl;
+    std::cout << "sum: " << arb_get_str(total, 192, 0) << std::endl;
 
     arb_clear(total);               // Clear and free memory.
     for (arb_t &obj : Sarray)
