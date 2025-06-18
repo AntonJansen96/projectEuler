@@ -133,7 +133,7 @@ inline void RootFinder::refine_bisect()
 {
     // Tunable parameters.
     size_t const iter = 10;   // Number of bisection steps per interval (5-100).
-    size_t const prec = 64;   // Working precision for interval arithmetic (30-200 bits).
+    size_t const prec = 128;  // Working precision for interval arithmetic (30-200 bits).
 
     for (size_t idx = 0; idx != d_num; ++idx)
     {
@@ -414,52 +414,48 @@ class Orbitrange
         }
 };
 
-int main()
+int main() // root interval finding only ~ 40min.
 {
-    Orbitrange orbit;
-    orbit.run_test_code();
+    // These parameters for b and intervals find all roots for P <= 25 (checked).
+    double const b = 6.75;               // interval limit [0, b].
+    size_t const intervals = 50000;      // Number of subintervals to multithread.
 
-    // ? Main code for Root Finding.
+    size_t total_found_roots = 0;        // Absolute total #roots to be found.
+    size_t const theoretical = 67108812; // sum_2^25(A000918) = 67108812.
 
-    // Parameters (good for P <= 15) to find ALL roots -> 1s
-    // size_t const P = 3;             // Period.
-    // double const b = 5.05;          // interval limit [0, b].
-    // size_t const intervals = 8;     // Tune multithreading (intervals).
+    stopwatch::ProgressReport report(theoretical);
+    stopwatch::Stopwatch timer;
 
-    // Parameters (good for P <= 20) to find ALL roots -> 27s
-    // size_t const P = 20;            // Period.
-    // double const b = 5.95;          // interval limit [0, b].
-    // size_t const intervals = 200;   // Tune multithreading (intervals).
-
-    // Parameters (good for P <= 23) to find ALL roots -> > 4m37s
-    // size_t const P = 23;            // Period.
-    // double const b = 6.5;           // interval limit [0, b].
-    // size_t const intervals = 5000;  // Tune multithreading (intervals).
-
-    // Parameters (good for all P <= 25) to find ALL roots -> 14m2s
-    size_t const P = 25;            // Period.
-    double const b = 6.75;          // interval limit [0, b].
-    size_t const intervals = 30000; // Tune multithreading (intervals).
-
-    // 5000 -> Found roots: 26715784/33554430 (79.6192%)
-    // 5000, 200 bits precision -> Found roots: 26715784/33554430 (79.6192%)
-    // 20000 -> Found roots: 33151608/33554430 (98.7995%) -> 16m2s
-
-    stopwatch::ProgressReport report(intervals);
-
-    std::atomic<size_t> total_found_roots{0};
-    #pragma omp parallel for schedule(dynamic)
-    for (size_t idx = 0; idx != intervals; ++idx)
+    for (size_t P : range(2, 25 + 1))
     {
-        double const width = b / intervals;
-        double const x = idx * width;
-        double const y = (idx + 1) * width;
-        total_found_roots += RootFinder(P, x, y).run();
-        report.tick();
+        // Total number of roots found for given P. Should correspond to A000918.
+        std::atomic<size_t> total_found_roots_per_P{0};
+
+        timer.start();
+        #pragma omp parallel for schedule(dynamic)
+        for (size_t idx = 0; idx != intervals; ++idx)
+        {
+            double const width = b / intervals;
+            double const x = idx * width;
+            double const y = (idx + 1) * width;
+
+            size_t const found = RootFinder(P, x, y).run();
+            total_found_roots_per_P += found;
+
+            report.tick(2 * found); // 2x since interval [0, b].
+        }
+        timer.stop();
+
+        stopwatch::sleep(0.1); // allow progress thread to catch up for nicer output formatting.
+        size_t const theoretical = pow(2, P) - 2;
+        double const ratio = 200 * total_found_roots_per_P / static_cast<double>(theoretical);
+        print(fs("P = {} | Found roots: {}/{} ({}%) in {}", P, 2 * total_found_roots_per_P, theoretical, ratio, timer));
+
+        total_found_roots += total_found_roots_per_P;
+        timer.reset();
     }
     report.join();
 
-    size_t const theoretical = pow(2, P) - 2;
     double const ratio = 200 * total_found_roots / static_cast<double>(theoretical);
-    print(fs("Found roots: {}/{} ({}%)", 2 * total_found_roots, theoretical, ratio));
+    print(fs("Total | Found roots: {}/{} ({}%)", 2 * total_found_roots, theoretical, ratio));
 }
