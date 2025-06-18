@@ -125,7 +125,7 @@ inline void RootFinder::refine_bisect()
 {
     // Tunable parameters.
     size_t const iter = 75;   // Number of bisection steps per interval (5-100).
-    size_t const prec = 128;  // Working precision for interval arithmetic (30-200 bits).
+    size_t const prec = 200;  // Working precision for interval arithmetic (30-200 bits).
 
     for (size_t idx = 0; idx != d_num; ++idx)
     {
@@ -281,7 +281,7 @@ inline int RootFinder::myfunc(arb_ptr out, const arb_t inp, void *param, slong o
 class Orbitrange
 {
     arb_t root, max, min, inv_root;
-    size_t const d_prec = 128;
+    size_t const d_prec = 200;
 
     public:
         Orbitrange()
@@ -414,7 +414,7 @@ class Orbitrange
 int main()
 {
     omp_set_num_threads(4);             // Number of threads to use.
-    size_t const Pmax = 5;              // Compute S(Pmax).
+    size_t const Pmax = 20;             // Compute S(Pmax).
 
     // These parameters for b and intervals find all roots for P <= 25 (checked).
 
@@ -428,9 +428,6 @@ int main()
     // Class that handles progress tracking.
     stopwatch::ProgressReport report(theoretical);  
 
-    // Class that handles calculation of orbit ranges and multiplicity correction.
-    Orbitrange orbit;
-
     // Declare and initialze Sarray vector containing arb_t objects.
     std::vector<arb_t> Sarray(Pmax + 1);  
     for (auto &obj : Sarray)
@@ -438,11 +435,6 @@ int main()
         arb_init(obj);                  // Initialize arb_t obj in Sarray.
         arb_zero(obj);                  // Set value to 0.
     }
-
-    arb_t root, range1, range2;         // Store intermediate values.
-    arb_init(root);
-    arb_init(range1);
-    arb_init(range2);
 
     for (size_t P = 2; P <= Pmax; ++P)  // Main loop starts here.
     {
@@ -459,6 +451,14 @@ int main()
             #pragma omp for schedule(dynamic)
             for (size_t idx = 0; idx != intervals; ++idx)
             {   
+                // Class that handles calculation of orbit ranges and multiplicity correction.
+                Orbitrange orbit;
+
+                arb_t root, range1, range2;             // Store intermediate values.
+                arb_init(root);
+                arb_init(range1);
+                arb_init(range2); 
+                
                 double const width = b / intervals;     // Compute x and y
                 double const x = idx * width;           // for this specific
                 double const y = (idx + 1) * width;     // interval.
@@ -471,23 +471,27 @@ int main()
                 {   // Only consider intervals with a root...
                     if (result.flags[ii] == 1) 
                     {   // Convert from arf_interval to arb_t.
-                        arf_interval_get_arb(root, result.blocks + ii, 128);
+                        arf_interval_get_arb(root, result.blocks + ii, 200);
                         orbit.range(range1, root, P);  // range from positive root
                         arb_neg(root, root);           // swap root sign
                         orbit.range(range2, root, P);  // range from negative root
 
-                        arb_add(local_sum, local_sum, range1, 128);
-                        arb_add(local_sum, local_sum, range2, 128);
+                        arb_add(local_sum, local_sum, range1, 200);
+                        arb_add(local_sum, local_sum, range2, 200);
                     }
                 }
 
                 total_found_roots += result.found_roots;
                 report.tick(2 * result.found_roots); // 2x since interval [0, b].
+
+                arb_clear(root);
+                arb_clear(range1);
+                arb_clear(range2);
             }
 
             #pragma omp critical
             {
-                arb_add(Sarray[P], Sarray[P], local_sum, 128);
+                arb_add(Sarray[P], Sarray[P], local_sum, 200);
             }
             arb_clear(local_sum);
         }
@@ -505,6 +509,7 @@ int main()
     report.join();
 
     // Perform the correction for the orbit multiplicity.
+    Orbitrange orbit;
     orbit.correct(Sarray);
 
     // Print Sarray and compute the sum.
@@ -514,19 +519,15 @@ int main()
     print("\nSarray:");
     for (size_t idx = 0; idx != Sarray.size(); ++idx)
     {
-        print(idx, arb_get_str(Sarray[idx], 128, 0));
-        arb_add(total, total, Sarray[idx], 128);
+        print(idx, arb_get_str(Sarray[idx], 200, 0));
+        arb_add(total, total, Sarray[idx], 200);
     }
 
     // Print final answer.
-    print(fs("sum: {}", arb_get_str(total, 128, 0)));
+    print(fs("sum: {}", arb_get_str(total, 200, 0)));
 
     // Clear and free memory.
-    arb_clear(root);
-    arb_clear(range1);
-    arb_clear(range2);
     arb_clear(total);
-
     for (arb_t &obj : Sarray)
         arb_clear(obj);
 }
