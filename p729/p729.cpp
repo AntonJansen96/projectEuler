@@ -118,46 +118,55 @@ inline void RootFinder::refine_bisect()
 }
 
 // Function for project Euler problem 729.
-inline int RootFinder::func(arb_ptr out, const arb_t inp, void *param, slong order, slong prec)
+inline int RootFinder::func(arb_ptr out, const arb_t inp, void* param, slong order, slong prec)
 {
     size_t const P = *static_cast<size_t*>(param);
 
-    // Initialize x as the power series for the variable centered at inp
+    if (order == 1)
+    {
+        arb_t x, invx;
+        arb_init(x);
+        arb_init(invx);
+        arb_set(x, inp);
+
+        for (size_t i = 0; i != P; ++i)
+        {
+            arb_inv(invx, x, prec);
+            arb_sub(x, x, invx, prec);
+        }
+
+        arb_sub(out, x, inp, prec);
+        arb_clear(x);
+        arb_clear(invx);
+        return 0;
+    }
+
     arb_ptr x = _arb_vec_init(order);
+    arb_ptr tmp = _arb_vec_init(order);
+
     arb_set(x, inp);
     if (order > 1)
         arb_one(x + 1);
-    for (slong i = 2; i < order; ++i)
-        arb_zero(x + i);
+    if (order > 2)
+        _arb_vec_zero(x + 2, order - 2);
 
-    // Compose the map P times as a power series
     for (size_t i = 0; i < P; ++i)
     {
-        arb_ptr invx = _arb_vec_init(order);
-        _arb_poly_inv_series(invx, x, order, order, prec);
-
-        arb_ptr next = _arb_vec_init(order);
-        _arb_vec_sub(next, x, invx, order, prec);
-
-        _arb_vec_clear(x, order);
-        _arb_vec_clear(invx, order);
-
-        x = next;
+        _arb_poly_inv_series(tmp, x, order, order, prec);
+        _arb_vec_sub(tmp, x, tmp, order, prec);
+        std::swap(x, tmp);
     }
 
-    // Subtract the original power series (the variable) from the result
-    arb_ptr var = _arb_vec_init(order);
-    arb_set(var, inp);
+    arb_set(tmp, inp);
     if (order > 1)
-        arb_one(var + 1);
-    for (slong i = 2; i < order; ++i)
-        arb_zero(var + i);
+        arb_one(tmp + 1);
+    if (order > 2)
+        _arb_vec_zero(tmp + 2, order - 2);
 
-    _arb_vec_sub(out, x, var, order, prec);
+    _arb_vec_sub(out, x, tmp, order, prec);
 
     _arb_vec_clear(x, order);
-    _arb_vec_clear(var, order);
-
+    _arb_vec_clear(tmp, order);
     return 0;
 }
 
