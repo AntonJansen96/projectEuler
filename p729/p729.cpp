@@ -414,7 +414,7 @@ class Orbitrange
 int main()
 {
     omp_set_num_threads(4);             // Number of threads to use.
-    size_t const Pmax = 20;             // Compute S(Pmax).
+    size_t const Pmax = 25;             // Compute S(Pmax).
 
     // These parameters for b and intervals find all roots for P <= 25 (checked).
 
