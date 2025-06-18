@@ -1,8 +1,10 @@
+#include <atomic>
+#include <iomanip>
+#include <omp.h>
 #include <flint/arb_poly.h>
 #include <flint/arb_calc.h>
-#include <omp.h>
-#include "cpplib/pythonlike.h"
-#include "cpplib/stopwatch.h"
+#include <cpplib/pythonlike.h>
+#include <cpplib/stopwatch.h>
 
 using namespace pythonlike;
 
@@ -31,7 +33,7 @@ class RootFinder
         // Destructor.
         ~RootFinder();
         // Run root finding.
-        void run();
+        size_t run();
 
     private:
         // Compute intervals.
@@ -53,9 +55,9 @@ class RootFinder
 // Constructor.
 inline RootFinder::RootFinder(size_t P, double a, double b)
 :
-    d_P(P),    
+    d_P(P),
     // d_func(sin_x2),  // Test function sin(x^2).
-    d_func(myfunc),     // Actualy function for Project Euler problem 729.
+    d_func(myfunc),     // Actual function for Project Euler problem 729.
     d_param(&d_P),
     d_a(a),
     d_b(b)
@@ -73,23 +75,30 @@ inline RootFinder::~RootFinder()
 }
 
 // Run root finding.
-inline void RootFinder::run()
+inline size_t RootFinder::run()
 {
-    stopwatch::Stopwatch timer1, timer2, timer3;
-    
-    timer1.start(); this->compute_intervals(); timer1.stop();
+    // stopwatch::Stopwatch timer1, timer2, timer3;
+
+    // timer1.start(); 
+    this->compute_intervals(); 
+    // timer1.stop();
     // this->printintervals(); // debug
 
-    // timer2.start(); this->refine_bisect(); timer2.stop();
-    // this->printintervals();
-    
-    // timer3.start(); this->refine_newton(); timer3.stop();
+    // timer2.start(); 
+    // this->refine_bisect(); 
+    // timer2.stop();
+    // this->printintervals(); // debug
 
-    this->summary();
-    print(fs("Compute_intervals: {}", timer1));
-    print(fs("Refine_bisect:     {}", timer2));
-    print(fs("Refine_newton:     {}", timer3));
-    print(fs("Total time:        {}", timer1 + timer2 + timer3));
+    // timer3.start();
+    // this->refine_newton();
+    // timer3.stop();
+
+    // this->summary();
+    // print(fs("Compute_intervals: {}", timer1));
+    // print(fs("Refine_bisect:     {}", timer2));
+    // print(fs("Refine_newton:     {}", timer3));
+    // print(fs("Total time:        {}", timer1 + timer2 + timer3));
+    return d_found_roots;
 }
 
 // Compute intervals.
@@ -177,7 +186,7 @@ inline void RootFinder::printintervals()
 {
     // Tunable parameters.
     size_t const digits = 10; // This is fine, don't change.
-    
+
     size_t count = 1;
     arb_t d_temp;
     arb_init(d_temp);
@@ -276,34 +285,181 @@ inline int RootFinder::myfunc(arb_ptr out, const arb_t inp, void *param, slong o
     return 0;
 }
 
+// Handles calculation of the orbit ranges and orbit multiplicity correction.
+class Orbitrange
+{
+    arb_t root, max, min, inv_root;
+    size_t const d_prec = 128;
+
+    public:
+        Orbitrange()
+        {
+            arb_init(root);
+            arb_init(max);
+            arb_init(min);
+            arb_init(inv_root);
+        }
+
+        ~Orbitrange()
+        {
+            arb_clear(root);
+            arb_clear(max);
+            arb_clear(min);
+            arb_clear(inv_root);
+        }
+
+        // Calculate the orbit range for given root and periodicity P.
+        // Out is set to the output (the range), for given root and period P.
+        void range(arb_t out, arb_t root_in, size_t P)
+        {
+            arb_set(root, root_in);     // Making a copy here to be safe.
+            arb_set(max, root_in);
+            arb_set(min, root_in);
+
+            for (size_t idx = 0; idx != P; ++idx)
+            {
+                if (arb_gt(root, max))                   // if root > max
+                    arb_set(max, root);
+                else if (arb_lt(root, min))              // if root < min
+                    arb_set(min, root);
+
+                arb_inv(inv_root, root, d_prec);         // inv_root = 1/root
+                arb_sub(root, root, inv_root, d_prec);   // root = root - 1/root
+            }
+
+            arb_sub(out, max, min, d_prec);
+        }
+
+        // Calculate the orbit range for given root and periodicity P.
+        // This is just a test function that works with doubles.
+        double test_range(double root, size_t P)
+        {
+            double max = root;
+            double min = root;
+            for (size_t idx = 0; idx != P; ++idx)
+            {
+                if (root > max)
+                    max = root;
+                else if (root < min)
+                    min = root;
+                root -= 1 / root;
+            }
+            return max - min;
+        }
+
+        // Corrects the Sarray for orbit multiplicity (in-place).
+        void correct(std::vector<arb_t> &Sarray)
+        {
+            for (size_t ii = 2; ii != Sarray.size(); ++ii)
+                for (size_t div : this->divisors(ii))
+                    arb_sub(Sarray[ii], Sarray[ii], Sarray[div], d_prec);
+        }
+
+        // Corrects the Sarray for orbit multiplicity (in-place).
+        // This is just a test function that works with std::vector<double>.
+        void test_correct(std::vector<double> &Sarray)
+        {
+            for (size_t ii = 2; ii != Sarray.size(); ++ii)
+                for (size_t div : this->divisors(ii))
+                    Sarray[ii] -= Sarray[div];
+        }
+
+        // Run example code of how we can compute an Sarray from the roots.
+        // Also performs the multiplicity correction.
+        void run_test_code()
+        {
+            std::vector<double> const root2 = {0.7071067812};
+            std::vector<double> const root3 = {0.5077133059, 0.7778619134, 1.4619022001};
+            std::vector<double> const root4 = {0.4158233816, 0.5411961001, 0.7071067812, 0.8134732862, 1.3065629649, 1.4862896510, 1.9890437907};
+            std::vector<double> const root5 = {0.3602664845, 0.4363958122, 0.5165981962, 0.5561971984, 0.6851062005, 0.7144911876, 0.7745215176, 0.8359612342, 1.2417262771, 1.3160479384, 1.4191422057, 1.5018199946, 1.8551018882, 2.0014562076, 2.4154566070};
+
+            std::vector<double> Sarray(5 + 1);
+
+            for (double root : root2)
+                Sarray[2] += this->test_range(root, 2) + this->test_range(-root, 2);
+
+            for (double root : root3)
+                Sarray[3] += this->test_range(root, 3) + this->test_range(-root, 3);
+
+            for (double root : root4)
+                Sarray[4] += this->test_range(root, 4) + this->test_range(-root, 4);
+
+            for (double root : root5)
+                Sarray[5] += this->test_range(root, 5) + this->test_range(-root, 5);
+
+            print(Sarray);
+            std::cout << "Naive sum: " << std::fixed << std::setprecision(4) << sum(Sarray) << std::endl;
+
+            // Helper/debug code to set Sarray to https://oeis.org/A000918.
+            // for (size_t idx = 2; idx != 25 + 1; ++idx)
+                // Sarray[idx] = pow(2, idx) - 2;
+
+            // Running this confirms code below gives https://oeis.org/A056267.
+            this->test_correct(Sarray);
+
+            print(Sarray);
+            std::cout << "Corrected sum: " << std::fixed << std::setprecision(4) << sum(Sarray) << std::endl;
+        }
+
+    private:
+        // Non-trivial divisors of num.
+        // Naive implementation but only required up to num = 25 so fine here.
+        std::vector<size_t> divisors(size_t num)
+        {
+            std::vector<size_t> divisors;
+            for (size_t div = 2; div != num; ++div)
+                if (num % div == 0)
+                    divisors.push_back(div);
+            return divisors;
+        }
+};
+
 int main()
 {
-    // RootFinder(3, 0.001, 7.0).run();
-    // RootFinder(10, -4.1, 4.1).run(); // Project Euler
-    RootFinder(15, 0, 5.05).run(); // Project Euler
-    // RootFinder(20, 0, 6.0).run(); // Project Euler
+    Orbitrange orbit;
+    orbit.run_test_code();
+
+    // ? Main code for Root Finding.
+
+    // Parameters (good for P <= 15) to find ALL roots -> 1s
+    // size_t const P = 3;             // Period.
+    // double const b = 5.05;          // interval limit [0, b].
+    // size_t const intervals = 8;     // Tune multithreading (intervals).
+
+    // Parameters (good for P <= 20) to find ALL roots -> 27s
+    // size_t const P = 20;            // Period.
+    // double const b = 5.95;          // interval limit [0, b].
+    // size_t const intervals = 200;   // Tune multithreading (intervals).
+
+    // Parameters (good for P <= 23) to find ALL roots -> > 4m37s
+    // size_t const P = 23;            // Period.
+    // double const b = 6.5;           // interval limit [0, b].
+    // size_t const intervals = 5000;  // Tune multithreading (intervals).
+
+    // Parameters (good for all P <= 25) to find ALL roots -> 14m2s
+    size_t const P = 25;            // Period.
+    double const b = 6.75;          // interval limit [0, b].
+    size_t const intervals = 30000; // Tune multithreading (intervals).
+
+    // 5000 -> Found roots: 26715784/33554430 (79.6192%)
+    // 5000, 200 bits precision -> Found roots: 26715784/33554430 (79.6192%)
+    // 20000 -> Found roots: 33151608/33554430 (98.7995%) -> 16m2s
+
+    stopwatch::ProgressReport report(intervals);
+
+    std::atomic<size_t> total_found_roots{0};
+    #pragma omp parallel for schedule(dynamic)
+    for (size_t idx = 0; idx != intervals; ++idx)
+    {
+        double const width = b / intervals;
+        double const x = idx * width;
+        double const y = (idx + 1) * width;
+        total_found_roots += RootFinder(P, x, y).run();
+        report.tick();
+    }
+    report.join();
+
+    size_t const theoretical = pow(2, P) - 2;
+    double const ratio = 200 * total_found_roots / static_cast<double>(theoretical);
+    print(fs("Found roots: {}/{} ({}%)", 2 * total_found_roots, theoretical, ratio));
 }
-
-// P = 3 (count = 6)
-// -1.4619022001
-// -0.7778619134
-// -0.5077133059
-//  0.5077133059
-//  0.7778619134
-//  1.4619022001
-
-// P = 4 (count = 14)
-// -1.9890437907
-// -1.4862896510
-// -1.3065629649
-// -0.8134732862
-// -0.7071067819
-// -0.5411961001
-// -0.4158233816
-//  0.4158233816
-//  0.5411961001
-//  0.7071067819
-//  0.8134732862
-//  1.3065629649
-//  1.4862896510
-//  1.9890437907
