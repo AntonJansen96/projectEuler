@@ -4,18 +4,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
+
 def F(x, P):
     for _ in range(P):
         x -= 1 / x  # x = f(x) = x - 1 / x
     return x
 
+
 # PARAMS
 P = 4
 xstep = 0.0001
-
-
-
-
 
 xlim = P - 1.8
 iList = np.arange(-xlim, xlim, xstep)
@@ -58,8 +56,8 @@ for i in tqdm(iList):
 plt.figure(dpi=200)
 plt.title(f"$P = {P}$")
 plt.plot(xVals, yVals)
-plt.hlines(y=0.0, xmin=-xlim, xmax=xlim, linestyles="--", color='black')
-plt.vlines(x=0.0, ymin=-10, ymax=10, linestyles="--", color='black')
+plt.hlines(y=0.0, xmin=-xlim, xmax=xlim, linestyles="--", color="black")
+plt.vlines(x=0.0, ymin=-10, ymax=10, linestyles="--", color="black")
 plt.axis([-xlim, xlim, -10, 10])
 plt.xlabel("$a_0$")
 plt.ylabel("")
